@@ -1,9 +1,16 @@
 import type Database from "better-sqlite3";
-import { LOCAL_USER_ID, POC_RELEASE_CUTOFF } from "@/lib/constants";
+import { LOCAL_USER_ID } from "@/lib/constants";
+import { resolveHeatmapColumns } from "@/lib/heatmap-column-resolve";
 
 export type HeatmapFilters = {
   rarity: string[];
   sets: string[];
+  /** Set codes to hide from heatmap columns (blacklist). */
+  hiddenSets: string[];
+  /** Set types to exclude from columns (e.g. memorabilia,promo). */
+  excludeSetTypes: string[];
+  /** Preset group ids (see set-column-groups) whose set_types are excluded from columns. */
+  excludeGroups: string[];
   yearMin: number | null;
   yearMax: number | null;
   priceMin: number | null;
@@ -18,7 +25,13 @@ export type HeatmapFilters = {
   includeDigital: boolean;
   specialGroup: string | null;
   search: string;
+  /**
+   * Row sort: name | printings | reserved | price_min | price_max | price_avg.
+   * price_* uses COALESCE(usd, usd_foil) over all heatmap columns for the filter.
+   */
   sort: string;
+  /** Column order: release | release_desc | code | name | type_release */
+  colSort: string;
   page: number;
   pageSize: number;
   showPinned: boolean;
@@ -65,6 +78,9 @@ export type RowDTO = {
 const defaultFilters: HeatmapFilters = {
   rarity: [],
   sets: [],
+  hiddenSets: [],
+  excludeSetTypes: [],
+  excludeGroups: [],
   yearMin: null,
   yearMax: null,
   priceMin: null,
@@ -80,6 +96,7 @@ const defaultFilters: HeatmapFilters = {
   specialGroup: null,
   search: "",
   sort: "name",
+  colSort: "release",
   page: 0,
   pageSize: 1000,
   showPinned: true,
@@ -88,6 +105,9 @@ const defaultFilters: HeatmapFilters = {
 export function parseFilters(sp: URLSearchParams): HeatmapFilters {
   const rarity = sp.get("rarity")?.split(",").filter(Boolean) ?? [];
   const sets = sp.get("sets")?.split(",").filter(Boolean) ?? [];
+  const hiddenSets = sp.get("hideSets")?.split(",").filter(Boolean) ?? [];
+  const excludeSetTypes = sp.get("exclTypes")?.split(",").filter(Boolean) ?? [];
+  const excludeGroups = sp.get("exclGroups")?.split(",").filter(Boolean) ?? [];
   const colors = sp.get("colors")?.split(",").filter(Boolean) ?? [];
   const formats = sp.get("formats")?.split(",").filter(Boolean) ?? [];
   const types = sp.get("types")?.split(",").filter(Boolean) ?? [];
@@ -105,6 +125,9 @@ export function parseFilters(sp: URLSearchParams): HeatmapFilters {
     ...defaultFilters,
     rarity,
     sets,
+    hiddenSets,
+    excludeSetTypes,
+    excludeGroups,
     colors,
     formats,
     types,
@@ -120,16 +143,47 @@ export function parseFilters(sp: URLSearchParams): HeatmapFilters {
     specialGroup: sp.get("group") || null,
     search: sp.get("q") ?? "",
     sort: sp.get("sort") ?? "name",
+    colSort: sp.get("colSort") ?? "release",
     page: Math.max(0, Number(sp.get("page") ?? 0) || 0),
     pageSize: Math.min(1500, Math.max(1, Number(sp.get("pageSize") ?? 1000) || 1000)),
     showPinned: sp.get("hidePinned") !== "1",
   };
 }
 
-function yearFromDate(d: string | null): number | null {
-  if (!d) return null;
-  const y = Number(d.slice(0, 4));
-  return Number.isFinite(y) ? y : null;
+function buildRowOrderClause(
+  f: HeatmapFilters,
+  setOrder: string[],
+): { clause: string; orderParams: unknown[] } {
+  const tie = "c.name COLLATE NOCASE ASC, c.oracle_id";
+  if (f.sort === "reserved") {
+    return { clause: `c.is_reserved DESC, ${tie}`, orderParams: [] };
+  }
+  if (f.sort === "printings") {
+    return {
+      clause: `(SELECT COUNT(*) FROM printings p0 WHERE p0.oracle_id = c.oracle_id) DESC, ${tie}`,
+      orderParams: [],
+    };
+  }
+  const ph = setOrder.length ? setOrder.map(() => "?").join(",") : "";
+  if (ph && f.sort === "price_min") {
+    return {
+      clause: `(SELECT MIN(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph}) AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) ASC NULLS LAST, ${tie}`,
+      orderParams: [...setOrder],
+    };
+  }
+  if (ph && f.sort === "price_max") {
+    return {
+      clause: `(SELECT MAX(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph}) AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) DESC NULLS LAST, ${tie}`,
+      orderParams: [...setOrder],
+    };
+  }
+  if (ph && f.sort === "price_avg") {
+    return {
+      clause: `(SELECT AVG(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph}) AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) ASC NULLS LAST, ${tie}`,
+      orderParams: [...setOrder],
+    };
+  }
+  return { clause: tie, orderParams: [] };
 }
 
 function cardWhereClause(f: HeatmapFilters): {
@@ -233,12 +287,9 @@ export function getHeatmapData(
   const countSql = `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${havingSql}`;
   const total = (db.prepare(countSql).get(...cardParams, ...havingParams) as { n: number }).n;
 
-  let orderBy = "c.name COLLATE NOCASE ASC";
-  if (f.sort === "reserved") orderBy = "c.is_reserved DESC, c.name COLLATE NOCASE ASC";
-  if (f.sort === "printings") {
-    orderBy =
-      "(SELECT COUNT(*) FROM printings p0 WHERE p0.oracle_id = c.oracle_id) DESC, c.name COLLATE NOCASE ASC";
-  }
+  const heatmapColumns = resolveHeatmapColumns(db, f, cardPred, cardParams, havingSql, havingParams);
+  const setOrder = heatmapColumns.map((c) => c.code);
+  const { clause: orderClause, orderParams } = buildRowOrderClause(f, setOrder);
 
   const pinnedRows: Record<string, unknown>[] = f.showPinned
     ? (db
@@ -246,9 +297,9 @@ export function getHeatmapData(
           `SELECT c.* FROM cards c
        JOIN pinned pin ON pin.oracle_id = c.oracle_id AND pin.user_id = ?
        WHERE ${cardPred} ${havingSql}
-       ORDER BY ${orderBy}`,
+       ORDER BY ${orderClause}`,
         )
-        .all(userId, ...cardParams, ...havingParams) as Record<string, unknown>[])
+        .all(userId, ...cardParams, ...havingParams, ...orderParams) as Record<string, unknown>[])
     : [];
 
   const offset = f.page * f.pageSize;
@@ -256,10 +307,10 @@ export function getHeatmapData(
     .prepare(
       `SELECT c.* FROM cards c
      WHERE ${cardPred} ${havingSql}
-     ORDER BY ${orderBy}
+     ORDER BY ${orderClause}
      LIMIT ? OFFSET ?`,
     )
-    .all(...cardParams, ...havingParams, f.pageSize, offset) as Record<string, unknown>[];
+    .all(...cardParams, ...havingParams, ...orderParams, f.pageSize, offset) as Record<string, unknown>[];
 
   const pinnedIds = new Set(pinnedRows.map((r) => r.oracle_id as string));
   const merged: Record<string, unknown>[] = [];
@@ -275,48 +326,29 @@ export function getHeatmapData(
 
   const oracleIds = merged.map((r) => r.oracle_id as string);
   if (!oracleIds.length) {
-    return { columns: [], rows: [], total };
+    return { columns: heatmapColumns, rows: [], total };
   }
 
   const inList = oracleIds.map(() => "?").join(",");
 
-  let colSql = `
-    SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path
-    FROM sets s
-    INNER JOIN printings p ON p.set_code = s.code
-    WHERE p.oracle_id IN (${inList})
-    AND (s.release_date IS NULL OR s.release_date <= ?)
-  `;
-  const colParams: unknown[] = [...oracleIds, POC_RELEASE_CUTOFF];
-  if (!f.includeDigital) colSql += ` AND s.is_digital = 0`;
-  if (f.sets.length) {
-    colSql += ` AND s.code IN (${f.sets.map(() => "?").join(",")})`;
-    colParams.push(...f.sets);
-  }
-  if (f.yearMin != null) {
-    colSql += ` AND CAST(strftime('%Y', s.release_date) AS INTEGER) >= ?`;
-    colParams.push(f.yearMin);
-  }
-  if (f.yearMax != null) {
-    colSql += ` AND CAST(strftime('%Y', s.release_date) AS INTEGER) <= ?`;
-    colParams.push(f.yearMax);
-  }
-  colSql += ` ORDER BY s.release_date ASC, s.code ASC`;
-
-  const colRows = db.prepare(colSql).all(...colParams) as Omit<ColumnMeta, "year">[];
-  const columns: ColumnMeta[] = colRows.map((r) => ({
-    ...r,
-    year: yearFromDate(r.release_date),
-  }));
-  const setOrder = columns.map((c) => c.code);
-
-  const printStmt = db.prepare(`
+  const printSql =
+    setOrder.length > 0
+      ? `
     SELECT p.*, pc.usd, pc.usd_foil, pc.eur, pc.tix
     FROM printings p
     LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
     WHERE p.oracle_id IN (${inList})
-  `);
-  const printingRows = printStmt.all(...oracleIds) as {
+      AND p.set_code IN (${setOrder.map(() => "?").join(",")})
+  `
+      : `
+    SELECT p.*, pc.usd, pc.usd_foil, pc.eur, pc.tix
+    FROM printings p
+    LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+    WHERE p.oracle_id IN (${inList})
+  `;
+  const printingRows = db
+    .prepare(printSql)
+    .all(...oracleIds, ...(setOrder.length ? setOrder : [])) as {
     oracle_id: string;
     set_code: string;
     scryfall_id: string;
@@ -430,5 +462,5 @@ export function getHeatmapData(
     };
   });
 
-  return { columns, rows, total };
+  return { columns: heatmapColumns, rows, total };
 }

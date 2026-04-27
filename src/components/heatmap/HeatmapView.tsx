@@ -27,8 +27,10 @@ import {
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
 import type { PriceMode } from "@/lib/price-scale";
 import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
+import { HeatmapFilterColumns } from "./HeatmapFilterColumns";
 import { HeatmapGrid } from "./HeatmapGrid";
 import { Legend } from "./Legend";
+import { Separator } from "@/components/ui/separator";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -296,7 +298,8 @@ export function HeatmapView() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">MTG Heatmap</h1>
           <p className="text-sm text-muted-foreground">
-            Rows = cards · Columns = sets (chronological) · POC ≤ 2005
+            Rows = cards · Columns = all sets matching filters · POC ≤ 2005 · header row / name column
+            stay fixed while scrolling
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -313,6 +316,24 @@ export function HeatmapView() {
           >
             ⌘K
           </button>
+          <Select
+            value={sp.get("colSort") ?? "release"}
+            onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
+          >
+            <SelectTrigger
+              className="h-9 w-[min(100vw-8rem,11rem)] text-xs"
+              title="Column order (sets left → right)"
+            >
+              <SelectValue placeholder="Columns" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="release">Cols: release ↑</SelectItem>
+              <SelectItem value="release_desc">Cols: release ↓</SelectItem>
+              <SelectItem value="code">Cols: set code</SelectItem>
+              <SelectItem value="name">Cols: set name</SelectItem>
+              <SelectItem value="type_release">Cols: type + date</SelectItem>
+            </SelectContent>
+          </Select>
           <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
@@ -336,6 +357,11 @@ export function HeatmapView() {
                 <SheetTitle>Filters</SheetTitle>
               </SheetHeader>
               <div className="mt-4 space-y-5 text-sm">
+                <HeatmapFilterColumns searchParamsString={queryString} setParam={setParam} />
+                <Separator />
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Row filters
+                </p>
                 <div className="space-y-2">
                   <Label htmlFor="heatmap-search">Search</Label>
                   <Input
@@ -346,17 +372,26 @@ export function HeatmapView() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Sort</Label>
+                  <Label>Sort rows</Label>
                   <Select value={sp.get("sort") ?? "name"} onValueChange={(v) => setParam("sort", v)}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="name">Name</SelectItem>
-                      <SelectItem value="printings">Print count</SelectItem>
+                      <SelectItem value="name">Name (A–Z)</SelectItem>
+                      <SelectItem value="printings">Print count (most first)</SelectItem>
                       <SelectItem value="reserved">Reserved first</SelectItem>
+                      <SelectItem value="price_min">USD: best (min)</SelectItem>
+                      <SelectItem value="price_avg">USD: mean (non-null)</SelectItem>
+                      <SelectItem value="price_max">USD: highest (max)</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Uses <span className="font-mono">COALESCE(usd, usd_foil)</span> on each visible
+                    column (same set list as column filters). Min finds the cheapest printing among
+                    editions shown; mean averages priced cells; max ranks by top printing. Median is
+                    skipped for now (extra SQL and often noisy with many empty cells).
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -602,6 +637,14 @@ export function HeatmapView() {
             <li>F: filters · /: search · Esc: close panels</li>
             <li>⌘K / Ctrl+K: command palette</li>
             <li>G then O / W / H: Owned / Watchlist / Home</li>
+            <li>
+              URL: colSort (release, release_desc, code, name, type_release); hideSets, exclTypes,
+              exclGroups (preset column groups); sets = allowlist columns
+            </li>
+            <li>
+              sort=price_min | price_avg | price_max (USD aggregate across heatmap columns); grid keeps
+              the set header row and card name column fixed while you scroll
+            </li>
           </ul>
         </SheetContent>
       </Sheet>
