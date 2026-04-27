@@ -13,9 +13,24 @@ import type Database from "better-sqlite3";
 import { getDbFilePath, openDbAt } from "../src/lib/db";
 import { LOCAL_USER_ID, POC_RELEASE_CUTOFF } from "../src/lib/constants";
 
-const UA =
-  process.env.SCRYFALL_USER_AGENT ||
-  "mtg-heatmap/1.0 (https://github.com/tinyminotaur/mtg-heatmap — replace with your contact)";
+/** Fetch `User-Agent` must be ByteString (no Unicode like em-dashes). */
+function asciiUserAgent(raw: string, maxLen = 256): string {
+  const t = [...raw]
+    .map((ch) => {
+      const c = ch.charCodeAt(0);
+      return c >= 32 && c <= 126 ? ch : "-";
+    })
+    .join("")
+    .replace(/-+/g, "-")
+    .trim()
+    .slice(0, maxLen);
+  return t || "mtg-heatmap/1.0 (+https://github.com/tinyminotaur/mtg-heatmap)";
+}
+
+const UA = asciiUserAgent(
+  (process.env.SCRYFALL_USER_AGENT ?? "").trim() ||
+    "mtg-heatmap/1.0 (+https://github.com/tinyminotaur/mtg-heatmap)",
+);
 
 const dbPath = getDbFilePath();
 
