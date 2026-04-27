@@ -4,10 +4,10 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { openDbAt } from "../src/lib/db";
+import { getDbFilePath, openDbAt } from "../src/lib/db";
 import { LOCAL_USER_ID } from "../src/lib/constants";
 
-const dbPath = path.join(process.cwd(), "data", "mtg.db");
+const dbPath = getDbFilePath();
 
 const sets = [
   ["LEA", "Limited Edition Alpha", "1993-08-05", "core", "/set-icons/lea.svg", 0],

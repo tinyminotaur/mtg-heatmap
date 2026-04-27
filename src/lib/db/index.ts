@@ -30,9 +30,36 @@ function resolveDbPath(): string {
     : path.join(/* turbopackIgnore: true */ process.cwd(), cleaned);
 }
 
+/** Bundled at build on Vercel; serverless FS is read-only except /tmp. */
+function bundledDbPath(): string {
+  return path.join(process.cwd(), "data", "mtg.db");
+}
+
+/**
+ * On Vercel, open a writable copy under /tmp (WAL + toggles need writes).
+ * Fresh file per deployment via VERCEL_DEPLOYMENT_ID.
+ */
+function resolveServerlessWritableDbPath(): string | null {
+  if (process.env.VERCEL !== "1") return null;
+  /** Explicit DATABASE_URL wins (e.g. hosted libSQL). */
+  if ((process.env.DATABASE_URL ?? "").trim()) return null;
+  const src = bundledDbPath();
+  if (!fs.existsSync(src)) return null;
+  const id = process.env.VERCEL_DEPLOYMENT_ID ?? "dev";
+  const dest = path.join("/tmp", `mtg-heatmap-${id}.db`);
+  try {
+    if (!fs.existsSync(dest)) {
+      fs.copyFileSync(src, dest);
+    }
+  } catch {
+    /* concurrent cold start */
+  }
+  return fs.existsSync(dest) ? dest : null;
+}
+
 export function getDb(): Database.Database {
   if (dbInstance) return dbInstance;
-  const dbPath = resolveDbPath();
+  const dbPath = resolveServerlessWritableDbPath() ?? resolveDbPath();
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");

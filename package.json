@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "next dev",
     "prebuild": "node scripts/debug-heatmap-query-scan.mjs",
-    "build": "next build",
+    "build": "node scripts/run-build.mjs",
     "start": "next start",
     "lint": "eslint",
     "db:seed": "tsx scripts/seed-demo.ts",
