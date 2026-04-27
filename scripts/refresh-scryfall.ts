@@ -48,7 +48,7 @@ type ScryfallCard = {
   set_type?: string;
   collector_number?: string;
   rarity?: string;
-  image_uris?: { small?: string; normal?: string };
+  image_uris?: { small?: string; normal?: string; large?: string };
   scryfall_uri?: string;
   purchase_uris?: { tcgplayer?: string; cardmarket?: string };
   prices?: {
@@ -146,8 +146,8 @@ async function main() {
      VALUES (@oracle_id,@name,@mana_cost,@cmc,@type_line,@oracle_text,@colors,@color_identity,@is_reserved,@legalities)`,
   );
   const insP = db.prepare(
-    `INSERT OR REPLACE INTO printings (scryfall_id, oracle_id, set_code, collector_number, rarity, released_at, image_uri_normal, image_uri_small, scryfall_uri, tcgplayer_url, cardmarket_url, is_foil_only, is_nonfoil_only, is_promo, frame_effects, finishes)
-     VALUES (@scryfall_id,@oracle_id,@set_code,@collector_number,@rarity,@released_at,@image_uri_normal,@image_uri_small,@scryfall_uri,@tcgplayer_url,@cardmarket_url,@is_foil_only,@is_nonfoil_only,@is_promo,@frame_effects,@finishes)`,
+    `INSERT OR REPLACE INTO printings (scryfall_id, oracle_id, set_code, collector_number, rarity, released_at, image_uri_large, image_uri_normal, image_uri_small, scryfall_uri, tcgplayer_url, cardmarket_url, is_foil_only, is_nonfoil_only, is_promo, frame_effects, finishes)
+     VALUES (@scryfall_id,@oracle_id,@set_code,@collector_number,@rarity,@released_at,@image_uri_large,@image_uri_normal,@image_uri_small,@scryfall_uri,@tcgplayer_url,@cardmarket_url,@is_foil_only,@is_nonfoil_only,@is_promo,@frame_effects,@finishes)`,
   );
   const insPrice = db.prepare(
     `INSERT OR REPLACE INTO prices_current (scryfall_id, usd, usd_foil, usd_etched, eur, eur_foil, tix, updated_at)
@@ -207,6 +207,7 @@ async function main() {
       collector_number: card.collector_number ?? "",
       rarity: card.rarity ?? "",
       released_at: rel,
+      image_uri_large: card.image_uris?.large ?? null,
       image_uri_normal: card.image_uris?.normal ?? null,
       image_uri_small: card.image_uris?.small ?? null,
       scryfall_uri: card.scryfall_uri ?? null,

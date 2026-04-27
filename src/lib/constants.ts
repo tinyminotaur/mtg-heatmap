@@ -12,7 +12,11 @@ export const CONDITION_VALUE_MULT: Record<string, number> = {
 export const POC_RELEASE_CUTOFF = "2005-12-31";
 
 export const HEATMAP_ROW_HEIGHT = 28;
-export const HEATMAP_COL_WIDTH = 44;
-export const HEATMAP_FROZEN_COL_W = 280;
-export const HEATMAP_HEADER_H = 56;
+export const HEATMAP_COL_WIDTH = 52;
+/** Full-height color identity strip at left of name column (px). */
+export const HEATMAP_IDENTITY_STRIP_W = 22;
+/** Wide enough for strip, name, and mana symbols. */
+export const HEATMAP_FROZEN_COL_W = 308;
+/** Fits set symbol + readable set code + year. */
+export const HEATMAP_HEADER_H = 76;
 export const HEATMAP_PAGE_SIZE = 1000;

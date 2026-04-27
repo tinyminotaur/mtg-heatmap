@@ -1,50 +1,24 @@
+/**
+ * Heatmap SQL pipeline (Track A — §11.2 stages):
+ * 1) Card predicates (`cardWhereClause` + optional group collapse)
+ * 2) Printing / collection predicates (`buildHaving`, rarity / price-in-visible-sets / owned / …)
+ * 3) Column resolution (`resolveHeatmapColumns`) — global set list before pagination
+ * 4) Price filter applied with visible column codes
+ * 5) Row selection + `ORDER BY` (global `setOrder` for value aggregates — see AGENTS.md)
+ * 6) Per-cell `printing_matches` for strict vs context display (§11.2.6)
+ */
+
 import type Database from "better-sqlite3";
 import { LOCAL_USER_ID } from "@/lib/constants";
-import { resolveHeatmapColumns } from "@/lib/heatmap-column-resolve";
+import type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
+import { defaultHeatmapFilters } from "@/lib/filter-state";
+import { resolveHeatmapColumns } from "./heatmap-column-resolve";
+import { parseHeatmapUrlSearchParams } from "@/lib/heatmap-url-params";
+import type { ColumnMeta } from "@/lib/heatmap-types";
 
-export type HeatmapFilters = {
-  rarity: string[];
-  sets: string[];
-  /** Set codes to hide from heatmap columns (blacklist). */
-  hiddenSets: string[];
-  /** Set types to exclude from columns (e.g. memorabilia,promo). */
-  excludeSetTypes: string[];
-  /** Preset group ids (see set-column-groups) whose set_types are excluded from columns. */
-  excludeGroups: string[];
-  yearMin: number | null;
-  yearMax: number | null;
-  priceMin: number | null;
-  priceMax: number | null;
-  colors: string[];
-  formats: string[];
-  types: string[];
-  owned: boolean | null;
-  watchlist: boolean | null;
-  pinned: boolean | null;
-  reservedOnly: boolean | null;
-  includeDigital: boolean;
-  specialGroup: string | null;
-  search: string;
-  /**
-   * Row sort: name | printings | reserved | price_min | price_max | price_avg.
-   * price_* uses COALESCE(usd, usd_foil) over all heatmap columns for the filter.
-   */
-  sort: string;
-  /** Column order: release | release_desc | code | name | type_release */
-  colSort: string;
-  page: number;
-  pageSize: number;
-  showPinned: boolean;
-};
-
-export type ColumnMeta = {
-  code: string;
-  name: string;
-  release_date: string | null;
-  set_type: string | null;
-  icon_svg_path: string | null;
-  year: number | null;
-};
+export type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
+export { defaultHeatmapFilters } from "@/lib/filter-state";
+export type { ColumnMeta } from "@/lib/heatmap-types";
 
 export type CellDTO = {
   scryfall_id: string;
@@ -54,9 +28,15 @@ export type CellDTO = {
   tix: number | null;
   rarity: string | null;
   image_small: string | null;
+  image_normal: string | null;
+  image_large: string | null;
   scryfall_uri: string | null;
   tcgplayer_url: string | null;
   cardmarket_url: string | null;
+  owned_qty: number;
+  watchlisted: boolean;
+  /** Printing-level predicates (rarity / visible-set price / per-printing owned & watchlist). */
+  printing_matches: boolean;
 };
 
 export type RowDTO = {
@@ -72,118 +52,138 @@ export type RowDTO = {
   owned_qty: number;
   watchlisted: boolean;
   pinned: boolean;
-  best_deal_col: number | null;
-};
-
-const defaultFilters: HeatmapFilters = {
-  rarity: [],
-  sets: [],
-  hiddenSets: [],
-  excludeSetTypes: [],
-  excludeGroups: [],
-  yearMin: null,
-  yearMax: null,
-  priceMin: null,
-  priceMax: null,
-  colors: [],
-  formats: [],
-  types: [],
-  owned: null,
-  watchlist: null,
-  pinned: null,
-  reservedOnly: null,
-  includeDigital: false,
-  specialGroup: null,
-  search: "",
-  sort: "name",
-  colSort: "release",
-  page: 0,
-  pageSize: 1000,
-  showPinned: true,
+  price_low_cols: number[];
+  price_high_cols: number[];
+  /** Single-level group key for §11.6 UI (null when not grouping). */
+  group_key: string | null;
 };
 
 export function parseFilters(sp: URLSearchParams): HeatmapFilters {
-  const rarity = sp.get("rarity")?.split(",").filter(Boolean) ?? [];
-  const sets = sp.get("sets")?.split(",").filter(Boolean) ?? [];
-  const hiddenSets = sp.get("hideSets")?.split(",").filter(Boolean) ?? [];
-  const excludeSetTypes = sp.get("exclTypes")?.split(",").filter(Boolean) ?? [];
-  const excludeGroups = sp.get("exclGroups")?.split(",").filter(Boolean) ?? [];
-  const colors = sp.get("colors")?.split(",").filter(Boolean) ?? [];
-  const formats = sp.get("formats")?.split(",").filter(Boolean) ?? [];
-  const types = sp.get("types")?.split(",").filter(Boolean) ?? [];
-  const yearMin = sp.get("yearMin") ? Number(sp.get("yearMin")) : null;
-  const yearMax = sp.get("yearMax") ? Number(sp.get("yearMax")) : null;
-  const priceMin = sp.get("priceMin") ? Number(sp.get("priceMin")) : null;
-  const priceMax = sp.get("priceMax") ? Number(sp.get("priceMax")) : null;
-  const parseBool = (k: string): boolean | null => {
-    const v = sp.get(k);
-    if (v === "1" || v === "true") return true;
-    if (v === "0" || v === "false") return false;
-    return null;
-  };
+  return parseHeatmapUrlSearchParams(sp);
+}
+
+/** Normalize older saved state missing new fields. */
+function normalizeFilters(f: HeatmapFilters): HeatmapFilters {
   return {
-    ...defaultFilters,
-    rarity,
-    sets,
-    hiddenSets,
-    excludeSetTypes,
-    excludeGroups,
-    colors,
-    formats,
-    types,
-    yearMin: Number.isFinite(yearMin as number) ? yearMin : null,
-    yearMax: Number.isFinite(yearMax as number) ? yearMax : null,
-    priceMin: Number.isFinite(priceMin as number) ? priceMin : null,
-    priceMax: Number.isFinite(priceMax as number) ? priceMax : null,
-    owned: parseBool("owned"),
-    watchlist: parseBool("watchlist"),
-    pinned: parseBool("pinned"),
-    reservedOnly: parseBool("reserved"),
-    includeDigital: sp.get("digital") === "1",
-    specialGroup: sp.get("group") || null,
-    search: sp.get("q") ?? "",
-    sort: sp.get("sort") ?? "name",
-    colSort: sp.get("colSort") ?? "release",
-    page: Math.max(0, Number(sp.get("page") ?? 0) || 0),
-    pageSize: Math.min(1500, Math.max(1, Number(sp.get("pageSize") ?? 1000) || 1000)),
-    showPinned: sp.get("hidePinned") !== "1",
+    ...defaultHeatmapFilters,
+    ...f,
+    sortSlots:
+      f.sortSlots?.length && f.sortSlots.length > 0
+        ? f.sortSlots
+        : [{ key: "name", dir: null }],
+  };
+}
+
+function groupKeyExpr(f: HeatmapFilters): string | null {
+  switch (f.groupBy) {
+    case "reserved":
+      return `CASE WHEN c.is_reserved = 1 THEN 'Reserved' ELSE 'Core' END`;
+    case "color":
+      return `COALESCE(NULLIF(TRIM(json_extract(c.color_identity, '$[0]')), ''), '(none)')`;
+    case "type":
+      return `LOWER(COALESCE(NULLIF(TRIM(SUBSTR(COALESCE(c.type_line, ''), 1, 16)), ''), '(none)'))`;
+    default:
+      return null;
+  }
+}
+
+function groupCollapsedClause(f: HeatmapFilters, gexpr: string | null): { sql: string; params: unknown[] } {
+  if (!gexpr || !f.groupCollapsedKeys.length) return { sql: "", params: [] };
+  const ph = f.groupCollapsedKeys.map(() => "?").join(",");
+  return { sql: ` AND (${gexpr}) NOT IN (${ph}) `, params: [...f.groupCollapsedKeys] };
+}
+
+function aggSetInSql(f: HeatmapFilters, setOrder: string[]): { inner: string; params: unknown[] } {
+  if (f.valueAggScope === "all" || !setOrder.length) return { inner: "", params: [] };
+  const ph = setOrder.map(() => "?").join(",");
+  return { inner: ` AND p.set_code IN (${ph}) `, params: [...setOrder] };
+}
+
+function priceValueSubquery(
+  kind: "min" | "max" | "median",
+  f: HeatmapFilters,
+  setOrder: string[],
+): { expr: string; params: unknown[] } {
+  const { inner, params: inParams } = aggSetInSql(f, setOrder);
+  const baseWhere = `p.oracle_id = c.oracle_id ${inner}
+      AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0`;
+  if (kind === "min") {
+    return {
+      expr: `(SELECT MIN(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE ${baseWhere})`,
+      params: inParams,
+    };
+  }
+  if (kind === "max") {
+    return {
+      expr: `(SELECT MAX(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE ${baseWhere})`,
+      params: inParams,
+    };
+  }
+  return {
+    expr: `(SELECT AVG(t.v) FROM (
+      SELECT COALESCE(pc.usd, pc.usd_foil) AS v,
+        ROW_NUMBER() OVER (ORDER BY COALESCE(pc.usd, pc.usd_foil)) AS rn,
+        COUNT(*) OVER () AS cnt
+      FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+      WHERE ${baseWhere}
+    ) AS t WHERE t.cnt > 0 AND t.rn IN ((t.cnt + 1) / 2, (t.cnt + 2) / 2))`,
+    params: inParams,
+  };
+}
+
+const ORDER_TIEBREAKER = "c.name COLLATE NOCASE ASC, c.oracle_id";
+
+/** One ORDER BY column expression (tiebreaker appended once after all slots). */
+function slotMetric(slot: SortSlot, f: HeatmapFilters, setOrder: string[]): { sql: string; orderParams: unknown[] } {
+  if (slot.key === "name") return { sql: `c.name COLLATE NOCASE ASC`, orderParams: [] };
+  if (slot.key === "reserved") return { sql: `c.is_reserved DESC`, orderParams: [] };
+  if (slot.key === "printings") {
+    return {
+      sql: `(SELECT COUNT(*) FROM printings p0 WHERE p0.oracle_id = c.oracle_id) DESC`,
+      orderParams: [],
+    };
+  }
+  if (!setOrder.length) return { sql: ORDER_TIEBREAKER, orderParams: [] };
+  const dir = slot.dir ?? (slot.key === "price_min" ? "asc" : "desc");
+  const nullPlacement = "NULLS LAST";
+  const kind = slot.key === "price_min" ? "min" : slot.key === "price_median" ? "median" : "max";
+  const { expr, params } = priceValueSubquery(kind, f, setOrder);
+  return {
+    sql: `${expr} ${dir.toUpperCase()} ${nullPlacement}`,
+    orderParams: params,
   };
 }
 
 function buildRowOrderClause(
   f: HeatmapFilters,
   setOrder: string[],
+  groupExpr: string | null,
 ): { clause: string; orderParams: unknown[] } {
-  const tie = "c.name COLLATE NOCASE ASC, c.oracle_id";
-  if (f.sort === "reserved") {
-    return { clause: `c.is_reserved DESC, ${tie}`, orderParams: [] };
+  const fx = normalizeFilters(f);
+  const parts: string[] = [];
+  const orderParams: unknown[] = [];
+
+  if (fx.headerSortSetCode && setOrder.includes(fx.headerSortSetCode)) {
+    parts.push(
+      `(SELECT COALESCE(pc.usd, pc.usd_foil) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+        WHERE p.oracle_id = c.oracle_id AND p.set_code = ? AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) DESC NULLS LAST`,
+    );
+    orderParams.push(fx.headerSortSetCode);
   }
-  if (f.sort === "printings") {
-    return {
-      clause: `(SELECT COUNT(*) FROM printings p0 WHERE p0.oracle_id = c.oracle_id) DESC, ${tie}`,
-      orderParams: [],
-    };
+
+  if (groupExpr && fx.groupBy !== "none") {
+    parts.push(fx.groupBy === "reserved" ? `${groupExpr} DESC` : `${groupExpr} ASC`);
   }
-  const ph = setOrder.length ? setOrder.map(() => "?").join(",") : "";
-  if (ph && f.sort === "price_min") {
-    return {
-      clause: `(SELECT MIN(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph}) AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) ASC NULLS LAST, ${tie}`,
-      orderParams: [...setOrder],
-    };
+
+  const slots = fx.sortSlots.length ? fx.sortSlots : [{ key: "name" as const, dir: null }];
+  for (const slot of slots.slice(0, 3)) {
+    const { sql, orderParams: op } = slotMetric(slot, fx, setOrder);
+    parts.push(sql);
+    orderParams.push(...op);
   }
-  if (ph && f.sort === "price_max") {
-    return {
-      clause: `(SELECT MAX(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph}) AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) DESC NULLS LAST, ${tie}`,
-      orderParams: [...setOrder],
-    };
-  }
-  if (ph && f.sort === "price_avg") {
-    return {
-      clause: `(SELECT AVG(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph}) AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) ASC NULLS LAST, ${tie}`,
-      orderParams: [...setOrder],
-    };
-  }
-  return { clause: tie, orderParams: [] };
+
+  parts.push(ORDER_TIEBREAKER);
+  return { clause: parts.join(", "), orderParams };
 }
 
 function cardWhereClause(f: HeatmapFilters): {
@@ -226,30 +226,59 @@ function cardWhereClause(f: HeatmapFilters): {
   return { sql: parts.join(" AND "), params };
 }
 
-function buildHaving(f: HeatmapFilters, userId: string): { sql: string; params: unknown[] } {
+type BuildHavingOpts = {
+  skipPrice?: boolean;
+  priceSetCodes?: string[];
+};
+
+function buildHaving(
+  f: HeatmapFilters,
+  userId: string,
+  opts: BuildHavingOpts = {},
+): { sql: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
+  const skipPrice = opts.skipPrice === true;
+  const priceSets = opts.priceSetCodes ?? [];
+  const priceInVisibleSets = priceSets.length > 0;
+  const setPh = priceSets.map(() => "?").join(",");
+
   if (f.rarity.length) {
     parts.push(
       `EXISTS (SELECT 1 FROM printings p2 WHERE p2.oracle_id = c.oracle_id AND p2.rarity IN (${f.rarity.map(() => "?").join(",")}))`,
     );
     params.push(...f.rarity);
   }
-  if (f.priceMin != null) {
-    parts.push(`EXISTS (
+  const wantsPrice = !skipPrice && (f.priceMin != null || f.priceMax != null);
+  if (wantsPrice) {
+    if (!priceInVisibleSets) {
+      parts.push("0=1");
+    } else if (f.priceMin != null && f.priceMax != null) {
+      parts.push(`EXISTS (
       SELECT 1 FROM printings p3 JOIN prices_current pc3 ON pc3.scryfall_id = p3.scryfall_id
-      WHERE p3.oracle_id = c.oracle_id AND COALESCE(pc3.usd, pc3.usd_foil) IS NOT NULL
+      WHERE p3.oracle_id = c.oracle_id AND p3.set_code IN (${setPh})
+      AND COALESCE(pc3.usd, pc3.usd_foil) IS NOT NULL
+      AND COALESCE(pc3.usd, pc3.usd_foil) >= ?
+      AND COALESCE(pc3.usd, pc3.usd_foil) <= ?
+    )`);
+      params.push(...priceSets, f.priceMin, f.priceMax);
+    } else if (f.priceMin != null) {
+      parts.push(`EXISTS (
+      SELECT 1 FROM printings p3 JOIN prices_current pc3 ON pc3.scryfall_id = p3.scryfall_id
+      WHERE p3.oracle_id = c.oracle_id AND p3.set_code IN (${setPh})
+      AND COALESCE(pc3.usd, pc3.usd_foil) IS NOT NULL
       AND COALESCE(pc3.usd, pc3.usd_foil) >= ?
     )`);
-    params.push(f.priceMin);
-  }
-  if (f.priceMax != null) {
-    parts.push(`EXISTS (
+      params.push(...priceSets, f.priceMin);
+    } else if (f.priceMax != null) {
+      parts.push(`EXISTS (
       SELECT 1 FROM printings p4 JOIN prices_current pc4 ON pc4.scryfall_id = p4.scryfall_id
-      WHERE p4.oracle_id = c.oracle_id AND COALESCE(pc4.usd, pc4.usd_foil) IS NOT NULL
+      WHERE p4.oracle_id = c.oracle_id AND p4.set_code IN (${setPh})
+      AND COALESCE(pc4.usd, pc4.usd_foil) IS NOT NULL
       AND COALESCE(pc4.usd, pc4.usd_foil) <= ?
     )`);
-    params.push(f.priceMax);
+      params.push(...priceSets, f.priceMax);
+    }
   }
   if (f.owned === true) {
     parts.push(`EXISTS (
@@ -275,52 +304,100 @@ function buildHaving(f: HeatmapFilters, userId: string): { sql: string; params: 
   return { sql, params };
 }
 
+function printingMatchesCell(
+  f: HeatmapFilters,
+  setCode: string,
+  p: {
+    rarity: string | null;
+    usd: number | null;
+    usd_foil: number | null;
+    scryfall_id: string;
+  },
+  priceSets: string[],
+  ownedQty: number,
+  watchlisted: boolean,
+): boolean {
+  if (f.rarity.length) {
+    if (!p.rarity || !f.rarity.includes(p.rarity)) return false;
+  }
+  const wantsPrice = f.priceMin != null || f.priceMax != null;
+  if (wantsPrice && priceSets.includes(setCode)) {
+    const v = p.usd ?? p.usd_foil;
+    if (v == null || !(v > 0)) return false;
+    if (f.priceMin != null && v < f.priceMin) return false;
+    if (f.priceMax != null && v > f.priceMax) return false;
+  }
+  if (f.owned === true && ownedQty <= 0) return false;
+  if (f.watchlist === true && !watchlisted) return false;
+  return true;
+}
+
 export function getHeatmapData(
   db: Database.Database,
   f: HeatmapFilters,
 ): { columns: ColumnMeta[]; rows: RowDTO[]; total: number } {
   const userId = LOCAL_USER_ID;
+  const fx = normalizeFilters(f);
 
-  const { sql: cardPred, params: cardParams } = cardWhereClause(f);
-  const { sql: havingSql, params: havingParams } = buildHaving(f, userId);
+  const { sql: cardPred, params: cardParams } = cardWhereClause(fx);
+  const havingNoPrice = buildHaving(fx, userId, { skipPrice: true });
+  const gexpr = groupKeyExpr(fx);
+  const gc = groupCollapsedClause(fx, gexpr);
 
-  const countSql = `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${havingSql}`;
-  const total = (db.prepare(countSql).get(...cardParams, ...havingParams) as { n: number }).n;
-
-  const heatmapColumns = resolveHeatmapColumns(db, f, cardPred, cardParams, havingSql, havingParams);
+  const heatmapColumns = resolveHeatmapColumns(
+    db,
+    fx,
+    cardPred,
+    cardParams,
+    havingNoPrice.sql,
+    havingNoPrice.params,
+    userId,
+  );
   const setOrder = heatmapColumns.map((c) => c.code);
-  const { clause: orderClause, orderParams } = buildRowOrderClause(f, setOrder);
 
-  const pinnedRows: Record<string, unknown>[] = f.showPinned
+  const { sql: havingSql, params: havingParams } = buildHaving(fx, userId, {
+    priceSetCodes: setOrder,
+  });
+
+  const whereTail = `${havingSql} ${gc.sql}`;
+  const whereParams = [...havingParams, ...gc.params];
+
+  const countSql = `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${whereTail}`;
+  const total = (db.prepare(countSql).get(...cardParams, ...whereParams) as { n: number }).n;
+
+  const gSelect = gexpr ? `, (${gexpr}) AS _gk` : ", NULL AS _gk";
+  const { clause: orderClause, orderParams } = buildRowOrderClause(fx, setOrder, gexpr);
+
+  const pinnedRows: Record<string, unknown>[] = fx.showPinned
     ? (db
         .prepare(
-          `SELECT c.* FROM cards c
+          `SELECT c.* ${gSelect} FROM cards c
        JOIN pinned pin ON pin.oracle_id = c.oracle_id AND pin.user_id = ?
-       WHERE ${cardPred} ${havingSql}
+       WHERE ${cardPred} ${whereTail}
        ORDER BY ${orderClause}`,
         )
-        .all(userId, ...cardParams, ...havingParams, ...orderParams) as Record<string, unknown>[])
+        .all(userId, ...cardParams, ...whereParams, ...orderParams) as Record<string, unknown>[])
     : [];
 
-  const offset = f.page * f.pageSize;
+  const offset = fx.page * fx.pageSize;
   const pageRows = db
     .prepare(
-      `SELECT c.* FROM cards c
-     WHERE ${cardPred} ${havingSql}
+      `SELECT c.* ${gSelect} FROM cards c
+     WHERE ${cardPred} ${whereTail}
      ORDER BY ${orderClause}
      LIMIT ? OFFSET ?`,
     )
-    .all(...cardParams, ...havingParams, ...orderParams, f.pageSize, offset) as Record<string, unknown>[];
+    .all(...cardParams, ...whereParams, ...orderParams, fx.pageSize, offset) as Record<string, unknown>[];
 
   const pinnedIds = new Set(pinnedRows.map((r) => r.oracle_id as string));
   const merged: Record<string, unknown>[] = [];
-  if (f.showPinned) {
+  if (fx.showPinned) {
     for (const r of pinnedRows) {
       if (!merged.find((m) => m.oracle_id === r.oracle_id)) merged.push(r);
     }
   }
   for (const r of pageRows) {
-    if (f.showPinned && pinnedIds.has(r.oracle_id as string)) continue;
+    if (fx.showPinned && pinnedIds.has(r.oracle_id as string)) continue;
     merged.push(r);
   }
 
@@ -358,6 +435,8 @@ export function getHeatmapData(
     tix: number | null;
     rarity: string | null;
     image_uri_small: string | null;
+    image_uri_normal: string | null;
+    image_uri_large: string | null;
     scryfall_uri: string | null;
     tcgplayer_url: string | null;
     cardmarket_url: string | null;
@@ -399,12 +478,17 @@ export function getHeatmapData(
     ).map((x) => x.oracle_id),
   );
 
+  const priceSetsForCells = setOrder;
+
   const rows: RowDTO[] = merged.map((card) => {
     const oid = card.oracle_id as string;
     const pmap = byOracle.get(oid) ?? new Map();
     const cells: (CellDTO | null)[] = setOrder.map((code) => {
       const p = pmap.get(code);
       if (!p) return null;
+      const oq = ownedMap.get(p.scryfall_id) ?? 0;
+      const wlisted = wl.has(p.scryfall_id);
+      const pm = printingMatchesCell(fx, code, p, priceSetsForCells, oq, wlisted);
       return {
         scryfall_id: p.scryfall_id,
         usd: p.usd,
@@ -413,23 +497,38 @@ export function getHeatmapData(
         tix: p.tix,
         rarity: p.rarity,
         image_small: p.image_uri_small,
+        image_normal: p.image_uri_normal ?? null,
+        image_large: p.image_uri_large ?? null,
         scryfall_uri: p.scryfall_uri,
         tcgplayer_url: p.tcgplayer_url,
         cardmarket_url: p.cardmarket_url,
+        owned_qty: oq,
+        watchlisted: wlisted,
+        printing_matches: pm,
       };
     });
 
-    let bestIdx: number | null = null;
-    let bestP: number | null = null;
+    const priced: { idx: number; v: number }[] = [];
     cells.forEach((cell, idx) => {
       if (!cell) return;
       const v = cell.usd ?? cell.usd_foil;
-      if (v == null || v <= 0) return;
-      if (bestP === null || v < bestP) {
-        bestP = v;
-        bestIdx = idx;
-      }
+      if (v == null || !(v > 0)) return;
+      priced.push({ idx, v });
     });
+    const price_low_cols: number[] = [];
+    const price_high_cols: number[] = [];
+    if (priced.length >= 2) {
+      const minV = Math.min(...priced.map((p) => p.v));
+      const maxV = Math.max(...priced.map((p) => p.v));
+      if (minV < maxV) {
+        for (const p of priced) {
+          if (p.v === minV) price_low_cols.push(p.idx);
+        }
+        for (const p of priced) {
+          if (p.v === maxV) price_high_cols.push(p.idx);
+        }
+      }
+    }
 
     let owned_qty = 0;
     for (const c of cells) {
@@ -445,6 +544,10 @@ export function getHeatmapData(
       }
     }
 
+    const gkRaw = card._gk;
+    const group_key =
+      typeof gkRaw === "string" || typeof gkRaw === "number" ? String(gkRaw) : fx.groupBy === "none" ? null : null;
+
     return {
       oracle_id: oid,
       name: card.name as string,
@@ -458,7 +561,9 @@ export function getHeatmapData(
       owned_qty,
       watchlisted,
       pinned: pin.has(oid),
-      best_deal_col: bestIdx,
+      price_low_cols,
+      price_high_cols,
+      group_key: fx.groupBy === "none" ? null : group_key,
     };
   });
 

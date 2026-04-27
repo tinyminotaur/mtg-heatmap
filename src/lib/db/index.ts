@@ -6,6 +6,15 @@ import { INIT_SQL } from "@/lib/db/schema";
 
 let dbInstance: Database.Database | null = null;
 
+/** Older DBs created before `image_uri_large` need this column for high-res art in the UI. */
+function migratePrintingsImageColumns(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(printings)`).all() as { name: string }[];
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("image_uri_large")) {
+    db.exec("ALTER TABLE printings ADD COLUMN image_uri_large TEXT");
+  }
+}
+
 export function getDbFilePath(): string {
   return resolveDbPath();
 }
@@ -25,6 +34,7 @@ export function getDb(): Database.Database {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.exec(INIT_SQL);
+  migratePrintingsImageColumns(db);
   db.prepare(
     `INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, NULL, datetime('now'))`,
   ).run(LOCAL_USER_ID);
@@ -38,6 +48,7 @@ export function openDbAt(filePath: string): Database.Database {
   const db = new Database(filePath);
   db.pragma("journal_mode = WAL");
   db.exec(INIT_SQL);
+  migratePrintingsImageColumns(db);
   db.prepare(
     `INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, NULL, datetime('now'))`,
   ).run(LOCAL_USER_ID);

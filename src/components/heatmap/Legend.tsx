@@ -36,6 +36,12 @@ export function Legend({ dark }: { dark: boolean }) {
           </span>
         ))}
       </div>
+      <p className="max-w-3xl text-[11px] leading-snug text-muted-foreground">
+        <span className="font-semibold text-cyan-800 dark:text-cyan-200">Lowest</span> /{" "}
+        <span className="font-semibold text-rose-800 dark:text-rose-200">Highest</span> on cells appear only when
+        at least two visible columns have a price for that card and the min and max differ (same USD rule as heat
+        colors: non-foil USD, else foil USD). A single priced column gets no badge.
+      </p>
     </div>
   );
 }

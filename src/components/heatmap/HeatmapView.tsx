@@ -3,9 +3,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/app-theme-provider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -24,14 +25,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cardImageUrlForDetail, cardImageUrlForPreview } from "@/lib/card-image-urls";
+import { formatPriceKind, getHeatmapPriceRange } from "@/lib/heatmap-best-deal";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
 import type { PriceMode } from "@/lib/price-scale";
-import { normalizedColSort, normalizedRowSort } from "@/lib/heatmap-url-params";
+import { normalizedColSort, normalizedRowSort, parseHeatmapUrlSearchParams } from "@/lib/heatmap-url-params";
 import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
+import { HeatmapFilterBar } from "./HeatmapFilterBar";
 import { HeatmapFilterColumns } from "./HeatmapFilterColumns";
-import { HeatmapGrid } from "./HeatmapGrid";
+import { HeatmapGrid, type HeatmapCellAnchorRect, type HeatmapGridHandle } from "./HeatmapGrid";
 import { Legend } from "./Legend";
 import { Separator } from "@/components/ui/separator";
+import { Maximize2, X } from "lucide-react";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -43,6 +48,136 @@ type HeatmapResponse = { columns: ColumnMeta[]; rows: RowDTO[]; total: number };
 
 const RARITIES = ["common", "uncommon", "rare", "mythic", "special", "bonus"] as const;
 
+/** Floating preview: vertical card + text needs width; height used for viewport clamping. */
+const PREVIEW_PANEL_W = 400;
+const PREVIEW_APPROX_H = 480;
+
+function computeFloatingPreviewPosition(
+  anchor: HeatmapCellAnchorRect | null | undefined,
+  fallbackX: number,
+  fallbackY: number,
+): { left: number; top: number; width: number } {
+  const pad = 10;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+  const overlap = 4;
+  const gap = 6 - overlap;
+  let left: number;
+  let top: number;
+  if (anchor && anchor.width > 0) {
+    const rightSide = anchor.left + anchor.width + gap;
+    const leftSide = anchor.left - PREVIEW_PANEL_W - gap;
+    if (rightSide + PREVIEW_PANEL_W <= vw - pad) left = rightSide;
+    else if (leftSide >= pad) left = leftSide;
+    else left = Math.max(pad, Math.min(rightSide, vw - PREVIEW_PANEL_W - pad));
+    top = anchor.top + (anchor.height - PREVIEW_APPROX_H) / 2;
+    top = Math.max(pad, Math.min(top, vh - PREVIEW_APPROX_H - pad));
+  } else {
+    left = Math.max(pad, Math.min(fallbackX + 12, vw - PREVIEW_PANEL_W - pad));
+    top = Math.max(pad, Math.min(fallbackY + 12, vh - PREVIEW_APPROX_H - pad));
+  }
+  return { left, top, width: PREVIEW_PANEL_W };
+}
+
+function HeatmapPriceRangeCallout({
+  row,
+  activeCol,
+  columns,
+  variant = "default",
+}: {
+  row: RowDTO | undefined;
+  activeCol: number;
+  columns: ColumnMeta[];
+  variant?: "default" | "compact";
+}) {
+  const range = getHeatmapPriceRange(row);
+  if (!range) return null;
+  const compact = variant === "compact";
+  const onLow = range.lowCols.includes(activeCol);
+  const onHigh = range.highCols.includes(activeCol);
+  const lowStr = range.lowAmount.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+  const highStr = range.highAmount.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+  const lowCol = columns[range.lowCols[0]];
+  const highCol = columns[range.highCols[0]];
+  if (!lowCol || !highCol) return null;
+  const borderClass =
+    onLow && !onHigh
+      ? "border-cyan-500/55 bg-cyan-500/10 dark:border-cyan-400/45 dark:bg-cyan-400/10"
+      : onHigh && !onLow
+        ? "border-rose-500/55 bg-rose-500/10 dark:border-rose-400/45 dark:bg-rose-400/10"
+        : "border-border bg-muted/35";
+  return (
+    <div
+      className={cn(
+        "rounded-md border leading-snug",
+        compact ? "space-y-1 p-2 text-[11px]" : "space-y-1.5 p-2.5 text-xs",
+        borderClass,
+      )}
+    >
+      <p className="font-semibold text-foreground">Price range on this heatmap</p>
+      {compact ? (
+        <p className="text-muted-foreground">
+          <span className="font-semibold text-cyan-800 dark:text-cyan-200">Lowest</span>:{" "}
+          <span className="font-mono">${lowStr}</span> ({formatPriceKind(range.lowPricedAsFoil)}) in{" "}
+          <span className="font-mono">{lowCol.code.toUpperCase()}</span>
+          {" · "}
+          <span className="font-semibold text-rose-800 dark:text-rose-200">Highest</span>:{" "}
+          <span className="font-mono">${highStr}</span> ({formatPriceKind(range.highPricedAsFoil)}) in{" "}
+          <span className="font-mono">{highCol.code.toUpperCase()}</span>
+        </p>
+      ) : (
+        <>
+          <p className="text-muted-foreground">
+            Among visible set columns, the cheapest printing is{" "}
+            <span className="font-medium text-foreground">
+              {lowCol.name} ({lowCol.code.toUpperCase()})
+            </span>
+            {lowCol.release_date ? ` · ${lowCol.release_date}` : null} at{" "}
+            <span className="font-mono font-medium text-foreground">${lowStr}</span> (
+            {formatPriceKind(range.lowPricedAsFoil)}). The priciest visible printing is{" "}
+            <span className="font-medium text-foreground">
+              {highCol.name} ({highCol.code.toUpperCase()})
+            </span>
+            {highCol.release_date ? ` · ${highCol.release_date}` : null} at{" "}
+            <span className="font-mono font-medium text-foreground">${highStr}</span> (
+            {formatPriceKind(range.highPricedAsFoil)}).
+          </p>
+          <p className="text-muted-foreground">
+            <span className="font-semibold text-cyan-800 dark:text-cyan-200">Lowest</span> /{" "}
+            <span className="font-semibold text-rose-800 dark:text-rose-200">Highest</span> badges on the grid
+            mark those cells (only when at least two columns have a price and min ≠ max).
+          </p>
+        </>
+      )}
+      {onLow && !onHigh ? (
+        <p
+          className={cn(
+            "font-medium text-cyan-950 dark:text-cyan-100",
+            compact && "text-[11px] leading-snug",
+          )}
+        >
+          This cell is a lowest-priced column for this row.
+        </p>
+      ) : onHigh && !onLow ? (
+        <p
+          className={cn(
+            "font-medium text-rose-950 dark:text-rose-100",
+            compact && "text-[11px] leading-snug",
+          )}
+        >
+          This cell is a highest-priced column for this row.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function HeatmapView() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -52,32 +187,11 @@ export function HeatmapView() {
 
   const queryString = useMemo(() => sp.toString(), [sp]);
   const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
-  const rowSortSelectValue = useMemo(() => normalizedRowSort(sp), [sp]);
-
-  useEffect(() => {
-    const s = new URLSearchParams(queryString);
-    const rawCol = s.get("colSort");
-    const rawSort = s.get("sort");
-    // #region agent log
-    fetch("http://127.0.0.1:7544/ingest/d3bac746-7f30-4189-a378-b3d32ca27dd5", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "e53e3b" },
-      body: JSON.stringify({
-        sessionId: "e53e3b",
-        hypothesisId: "H_empty_select_value",
-        location: "HeatmapView.tsx",
-        message: "sort URL params vs normalized Select values",
-        data: {
-          rawCol,
-          rawSort,
-          colSortSelectValue,
-          rowSortSelectValue,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [queryString, colSortSelectValue, rowSortSelectValue]);
+  const rowSortSelectValue = useMemo(() => {
+    const raw = (sp.get("sort") ?? "").split(":")[0]?.trim();
+    if (raw === "price_avg") return "price_median";
+    return normalizedRowSort(sp);
+  }, [sp]);
 
   const { data, isLoading, error } = useQuery<HeatmapResponse>({
     queryKey: ["heatmap", queryString],
@@ -93,7 +207,37 @@ export function HeatmapView() {
     cell: CellDTO | null;
     x: number;
     y: number;
+    anchor: HeatmapCellAnchorRect;
   } | null>(null);
+  const [previewPinned, setPreviewPinned] = useState(false);
+  const [anchorEpoch, setAnchorEpoch] = useState(0);
+  const [pinnedAnchor, setPinnedAnchor] = useState<HeatmapCellAnchorRect | null>(null);
+  const [cardDetailOpen, setCardDetailOpen] = useState(false);
+  const [detailPayload, setDetailPayload] = useState<{
+    row: number;
+    col: number;
+    cell: CellDTO;
+  } | null>(null);
+  const hoverDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cardPreviewRef = useRef<HTMLDivElement>(null);
+  const heatmapGridRef = useRef<HeatmapGridHandle>(null);
+  const heatmapPortRef = useRef<HTMLDivElement>(null);
+
+  const cancelHoverDismiss = useCallback(() => {
+    if (hoverDismissRef.current) {
+      clearTimeout(hoverDismissRef.current);
+      hoverDismissRef.current = null;
+    }
+  }, []);
+
+  const scheduleHoverDismiss = useCallback(() => {
+    cancelHoverDismiss();
+    hoverDismissRef.current = setTimeout(() => setHover(null), 450);
+  }, [cancelHoverDismiss]);
+
+  useEffect(() => {
+    return () => cancelHoverDismiss();
+  }, [cancelHoverDismiss]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -127,10 +271,61 @@ export function HeatmapView() {
     [router, sp],
   );
 
+  const replaceQuery = useCallback(
+    (p: URLSearchParams) => {
+      router.replace(`/?${p.toString()}`);
+    },
+    [router],
+  );
+
+  const heatmapMatchMode = useMemo(
+    () => (parseHeatmapUrlSearchParams(sp).matchMode === "strict" ? "strict" : "context"),
+    [sp],
+  );
+
   const maxR = Math.max(0, rows.length - 1);
   const maxC = Math.max(0, columns.length - 1);
   const rowIndex = rows.length ? Math.min(Math.max(0, selR), maxR) : 0;
   const colIndex = columns.length ? Math.min(Math.max(0, selC), maxC) : 0;
+  const selectionCell = rows.length ? (rows[rowIndex]?.cells[colIndex] ?? null) : null;
+
+  const bumpPinnedAnchor = useCallback(() => {
+    if (previewPinned) setAnchorEpoch((n) => n + 1);
+  }, [previewPinned]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const id = requestAnimationFrame(() => {
+      if (cancelled) return;
+      if (!previewPinned) {
+        setPinnedAnchor(null);
+        return;
+      }
+      if (!selectionCell) {
+        setPreviewPinned(false);
+        setPinnedAnchor(null);
+        return;
+      }
+      const a = heatmapGridRef.current?.getDataCellClientRect(rowIndex, colIndex) ?? null;
+      setPinnedAnchor(a);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+    };
+  }, [previewPinned, selectionCell, rowIndex, colIndex, anchorEpoch, rows.length, columns.length]);
+
+  useEffect(() => {
+    if (!previewPinned) return;
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (cardPreviewRef.current?.contains(t)) return;
+      if (heatmapPortRef.current?.contains(t)) return;
+      setPreviewPinned(false);
+    };
+    document.addEventListener("mousedown", onDocDown, true);
+    return () => document.removeEventListener("mousedown", onDocDown, true);
+  }, [previewPinned]);
 
   const toggleOwned = useCallback(async () => {
     const cell = rows[rowIndex]?.cells[colIndex];
@@ -209,9 +404,21 @@ export function HeatmapView() {
       }
 
       if (e.key === "Escape") {
+        if (cardDetailOpen) {
+          e.preventDefault();
+          setCardDetailOpen(false);
+          setDetailPayload(null);
+          return;
+        }
+        if (previewPinned) {
+          e.preventDefault();
+          setPreviewPinned(false);
+          return;
+        }
         setCmdOpen(false);
         setHelpOpen(false);
         setFiltersOpen(false);
+        cancelHoverDismiss();
         setHover(null);
         return;
       }
@@ -311,10 +518,55 @@ export function HeatmapView() {
     toggleOwned,
     togglePin,
     toggleWatch,
+    cardDetailOpen,
+    cancelHoverDismiss,
+    previewPinned,
   ]);
 
+  const floatingPreview = useMemo(() => {
+    if (previewPinned && selectionCell) {
+      const cx = pinnedAnchor ? pinnedAnchor.left + pinnedAnchor.width / 2 : 0;
+      const cy = pinnedAnchor ? pinnedAnchor.top + pinnedAnchor.height / 2 : 0;
+      return {
+        row: rowIndex,
+        col: colIndex,
+        cell: selectionCell,
+        anchor: pinnedAnchor,
+        x: cx,
+        y: cy,
+        locked: true as const,
+      };
+    }
+    if (hover?.cell) {
+      return {
+        row: hover.row,
+        col: hover.col,
+        cell: hover.cell,
+        anchor: hover.anchor,
+        x: hover.x,
+        y: hover.y,
+        locked: false as const,
+      };
+    }
+    return null;
+  }, [previewPinned, selectionCell, rowIndex, colIndex, pinnedAnchor, hover]);
+
+  const compactPreviewStyle = useMemo(() => {
+    const p = floatingPreview;
+    if (!p?.cell) return null;
+    if (p.locked && !p.anchor) return null;
+    return computeFloatingPreviewPosition(p.anchor, p.x, p.y);
+  }, [floatingPreview]);
+
+  const openCardDetail = useCallback(() => {
+    const p = floatingPreview;
+    if (!p?.cell) return;
+    setDetailPayload({ row: p.row, col: p.col, cell: p.cell });
+    setCardDetailOpen(true);
+  }, [floatingPreview]);
+
   return (
-    <div className="flex flex-1 flex-col gap-3 p-4">
+    <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden p-4">
       <HeatmapCommandPalette
         open={cmdOpen}
         onOpenChange={setCmdOpen}
@@ -323,7 +575,7 @@ export function HeatmapView() {
         onApplySearch={(q) => setParam("q", q)}
       />
 
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">MTG Heatmap</h1>
           <p className="text-sm text-muted-foreground">
@@ -395,7 +647,7 @@ export function HeatmapView() {
                   <Label htmlFor="heatmap-search">Search</Label>
                   <Input
                     id="heatmap-search"
-                    defaultValue={sp.get("q") ?? ""}
+                    value={sp.get("q") ?? ""}
                     onChange={(e) => setParam("q", e.target.value || null)}
                     placeholder="Card name contains…"
                   />
@@ -410,22 +662,22 @@ export function HeatmapView() {
                       <SelectItem value="name">Name (A–Z)</SelectItem>
                       <SelectItem value="printings">Print count (most first)</SelectItem>
                       <SelectItem value="reserved">Reserved first</SelectItem>
-                      <SelectItem value="price_min">USD: best (min)</SelectItem>
-                      <SelectItem value="price_avg">USD: mean (non-null)</SelectItem>
-                      <SelectItem value="price_max">USD: highest (max)</SelectItem>
+                      <SelectItem value="price_min">USD: min</SelectItem>
+                      <SelectItem value="price_median">USD: median</SelectItem>
+                      <SelectItem value="price_max">USD: max</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Uses <span className="font-mono">COALESCE(usd, usd_foil)</span> on each visible
-                    column (same set list as column filters). Min finds the cheapest printing among
-                    editions shown; mean averages priced cells; max ranks by top printing. Median is
-                    skipped for now (extra SQL and often noisy with many empty cells).
+                    Uses <span className="font-mono">COALESCE(usd, usd_foil)</span> with the global
+                    heatmap column list (see chip bar for visible vs all printings). Max / min / median
+                    × asc/desc; multi-sort via URL <span className="font-mono">sk=</span>.
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label htmlFor="yMin">Year min</Label>
                     <Input
+                      key={`yearMin-${sp.get("yearMin") ?? ""}`}
                       id="yMin"
                       type="number"
                       defaultValue={sp.get("yearMin") ?? ""}
@@ -435,6 +687,7 @@ export function HeatmapView() {
                   <div className="space-y-1">
                     <Label htmlFor="yMax">Year max</Label>
                     <Input
+                      key={`yearMax-${sp.get("yearMax") ?? ""}`}
                       id="yMax"
                       type="number"
                       defaultValue={sp.get("yearMax") ?? ""}
@@ -446,6 +699,7 @@ export function HeatmapView() {
                   <div className="space-y-1">
                     <Label htmlFor="pMin">Price min (USD)</Label>
                     <Input
+                      key={`priceMin-${sp.get("priceMin") ?? ""}`}
                       id="pMin"
                       type="number"
                       step="0.01"
@@ -456,6 +710,7 @@ export function HeatmapView() {
                   <div className="space-y-1">
                     <Label htmlFor="pMax">Price max (USD)</Label>
                     <Input
+                      key={`priceMax-${sp.get("priceMax") ?? ""}`}
                       id="pMax"
                       type="number"
                       step="0.01"
@@ -529,6 +784,7 @@ export function HeatmapView() {
                 <div className="space-y-2">
                   <Label>Special group slug</Label>
                   <Input
+                    key={`group-${sp.get("group") ?? ""}`}
                     defaultValue={sp.get("group") ?? ""}
                     onBlur={(e) => setParam("group", e.target.value.trim() || null)}
                     placeholder="e.g. power_nine"
@@ -540,9 +796,22 @@ export function HeatmapView() {
         </div>
       </header>
 
-      <Legend dark={dark} />
+      <HeatmapFilterBar
+        queryString={queryString}
+        columns={columns}
+        total={total}
+        rowCount={rows.length}
+        page={page}
+        pageSize={pageSize}
+        onReplaceQuery={replaceQuery}
+        onOpenFullFilters={() => setFiltersOpen(true)}
+      />
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+      <div className="shrink-0">
+        <Legend dark={dark} />
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
         <span>
           {total.toLocaleString()} cards match · showing {rows.length.toLocaleString()} on this page
         </span>
@@ -572,54 +841,119 @@ export function HeatmapView() {
         </div>
       </div>
 
-      {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
-      {error ? <p className="text-sm text-destructive">Failed to load heatmap.</p> : null}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : error ? (
+          <p className="text-sm text-destructive">Failed to load heatmap.</p>
+        ) : (
+          <HeatmapGrid
+            ref={heatmapGridRef}
+            columns={columns}
+            rows={rows}
+            priceMode={priceMode}
+            dark={dark}
+            matchMode={heatmapMatchMode}
+            selectedRow={rowIndex}
+            selectedCol={colIndex}
+            onSelectCell={(r, c) => {
+              setSelR(r);
+              setSelC(c);
+              const cell = rows[r]?.cells[c] ?? null;
+              setPreviewPinned(Boolean(cell));
+            }}
+            onHoverCell={(r, c, cell, x, y, anchor) => {
+              cancelHoverDismiss();
+              setHover({ row: r, col: c, cell, x, y, anchor });
+            }}
+            onLeaveGrid={scheduleHoverDismiss}
+            cardPreviewContainerRef={cardPreviewRef}
+            onViewportChange={bumpPinnedAnchor}
+            interactionPortRef={heatmapPortRef}
+            onHeaderSetClick={(setCode) => setParam("hcol", setCode)}
+          />
+        )}
+      </div>
 
-      {!isLoading && !error ? (
-        <HeatmapGrid
-          columns={columns}
-          rows={rows}
-          priceMode={priceMode}
-          dark={dark}
-          selectedRow={rowIndex}
-          selectedCol={colIndex}
-          onSelectCell={(r, c) => {
-            setSelR(r);
-            setSelC(c);
-          }}
-          onHoverCell={(r, c, cell, x, y) => setHover({ row: r, col: c, cell, x, y })}
-          onLeaveGrid={() => setHover(null)}
-        />
-      ) : null}
-
-      {hover?.cell ? (
+      {floatingPreview?.cell && compactPreviewStyle ? (
         <div
-          className="pointer-events-none fixed z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg"
-          style={{ left: hover.x + 12, top: hover.y + 12 }}
+          ref={cardPreviewRef}
+          className="pointer-events-auto fixed z-50 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg"
+          style={{
+            left: compactPreviewStyle.left,
+            top: compactPreviewStyle.top,
+            width: compactPreviewStyle.width,
+            maxWidth: "calc(100vw - 2rem)",
+          }}
+          onMouseEnter={cancelHoverDismiss}
+          onMouseLeave={floatingPreview.locked ? undefined : scheduleHoverDismiss}
         >
-          <div className="flex gap-3">
-            {hover.cell.image_small ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={hover.cell.image_small}
-                alt=""
-                width={120}
-                height={168}
-                className="h-40 w-[7.5rem] rounded-md border border-border object-cover"
-              />
+          <div className="mb-2 flex items-center justify-between gap-2 border-b border-border pb-2">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                {floatingPreview.locked ? "Pinned preview" : "Preview"}
+              </span>
+              {floatingPreview.locked ? (
+                <span className="text-[10px] leading-tight text-muted-foreground">
+                  Stays open while this cell is selected · Esc or click outside to close
+                </span>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {floatingPreview.locked ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label="Close pinned preview"
+                  onClick={() => setPreviewPinned(false)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              ) : null}
+              <Button type="button" variant="secondary" size="sm" className="h-7 gap-1 text-xs" onClick={openCardDetail}>
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                Expand
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-3">
+            {cardImageUrlForPreview(floatingPreview.cell) ? (
+              <div className="flex justify-center border-b border-border pb-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={cardImageUrlForPreview(floatingPreview.cell)!}
+                  alt=""
+                  width={488}
+                  height={680}
+                  className="max-h-[min(320px,52vh)] w-full max-w-[260px] rounded-md border border-border object-contain"
+                  sizes="(max-width: 480px) 85vw, 260px"
+                  decoding="async"
+                />
+              </div>
             ) : null}
-            <div className="min-w-0 space-y-1 text-sm">
-              <div className="font-medium leading-tight">{rows[hover.row]?.name}</div>
+            <div className="min-w-0 space-y-1.5 text-sm">
+              <div className="font-medium leading-tight">{rows[floatingPreview.row]?.name}</div>
               <div className="text-muted-foreground">
-                {columns[hover.col]?.name} ({columns[hover.col]?.release_date})
+                {columns[floatingPreview.col]?.name} ({columns[floatingPreview.col]?.release_date})
               </div>
               <div className="font-mono text-xs">
-                USD {hover.cell.usd ?? "—"} · Foil {hover.cell.usd_foil ?? "—"}
+                USD {floatingPreview.cell.usd ?? "—"} · Foil {floatingPreview.cell.usd_foil ?? "—"}
               </div>
-              <div className="pointer-events-auto flex flex-wrap gap-2 pt-2">
-                {hover.cell.scryfall_uri ? (
+              {floatingPreview.cell.rarity ? (
+                <div className="text-xs text-muted-foreground">Rarity: {floatingPreview.cell.rarity}</div>
+              ) : null}
+              <HeatmapPriceRangeCallout
+                row={rows[floatingPreview.row]}
+                activeCol={floatingPreview.col}
+                columns={columns}
+                variant="compact"
+              />
+              <div className="flex flex-wrap gap-2 pt-1">
+                {floatingPreview.cell.scryfall_uri ? (
                   <a
-                    href={hover.cell.scryfall_uri}
+                    href={floatingPreview.cell.scryfall_uri}
                     target="_blank"
                     rel="noreferrer"
                     className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
@@ -627,9 +961,9 @@ export function HeatmapView() {
                     Scryfall
                   </a>
                 ) : null}
-                {hover.cell.tcgplayer_url ? (
+                {floatingPreview.cell.tcgplayer_url ? (
                   <a
-                    href={hover.cell.tcgplayer_url}
+                    href={floatingPreview.cell.tcgplayer_url}
                     target="_blank"
                     rel="noreferrer"
                     className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
@@ -637,9 +971,9 @@ export function HeatmapView() {
                     TCGplayer
                   </a>
                 ) : null}
-                {hover.cell.cardmarket_url ? (
+                {floatingPreview.cell.cardmarket_url ? (
                   <a
-                    href={hover.cell.cardmarket_url}
+                    href={floatingPreview.cell.cardmarket_url}
                     target="_blank"
                     rel="noreferrer"
                     className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
@@ -652,6 +986,90 @@ export function HeatmapView() {
           </div>
         </div>
       ) : null}
+
+      <Dialog
+        open={cardDetailOpen}
+        onOpenChange={(open) => {
+          setCardDetailOpen(open);
+          if (!open) setDetailPayload(null);
+        }}
+      >
+        <DialogContent className="max-h-[min(92vh,900px)] w-full max-w-3xl overflow-y-auto">
+          {detailPayload ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="pr-8">{rows[detailPayload.row]?.name}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  {columns[detailPayload.col]?.name} · {columns[detailPayload.col]?.release_date ?? "—"}
+                </p>
+                <HeatmapPriceRangeCallout
+                  row={rows[detailPayload.row]}
+                  activeCol={detailPayload.col}
+                  columns={columns}
+                />
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+                  {cardImageUrlForDetail(detailPayload.cell) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={cardImageUrlForDetail(detailPayload.cell)!}
+                      alt=""
+                      width={672}
+                      height={936}
+                      className="mx-auto w-full max-w-[min(672px,92vw)] shrink-0 rounded-lg border border-border object-contain lg:mx-0 lg:max-w-[min(672px,48vw)]"
+                      sizes="(max-width: 1024px) 92vw, 672px"
+                      loading="eager"
+                      decoding="async"
+                    />
+                  ) : null}
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <p className="font-mono text-xs leading-relaxed">
+                      USD {detailPayload.cell.usd ?? "—"} · Foil {detailPayload.cell.usd_foil ?? "—"} · EUR{" "}
+                      {detailPayload.cell.eur ?? "—"} · Tix {detailPayload.cell.tix ?? "—"}
+                    </p>
+                    {detailPayload.cell.rarity ? (
+                      <p className="text-xs text-muted-foreground">Rarity: {detailPayload.cell.rarity}</p>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {detailPayload.cell.scryfall_uri ? (
+                        <a
+                          href={detailPayload.cell.scryfall_uri}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={cn(buttonVariants({ size: "sm", variant: "default" }))}
+                        >
+                          Open on Scryfall
+                        </a>
+                      ) : null}
+                      {detailPayload.cell.tcgplayer_url ? (
+                        <a
+                          href={detailPayload.cell.tcgplayer_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+                        >
+                          TCGplayer
+                        </a>
+                      ) : null}
+                      {detailPayload.cell.cardmarket_url ? (
+                        <a
+                          href={detailPayload.cell.cardmarket_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+                        >
+                          Cardmarket
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Sheet open={helpOpen} onOpenChange={setHelpOpen}>
         <SheetContent>
@@ -671,14 +1089,20 @@ export function HeatmapView() {
               exclGroups (preset column groups); sets = allowlist columns
             </li>
             <li>
-              sort=price_min | price_avg | price_max (USD aggregate across heatmap columns); grid keeps
-              the set header row and card name column fixed while you scroll
+              sort / sk: price_min | price_median | price_max with asc/desc; optional hcol= set code for
+              temporary column sort; strict=1 hides non-matching printings; emptyCols=1 shows in-scope
+              empty columns; grid keeps the set header row and card name column fixed while you scroll
+            </li>
+            <li>
+              Click a cell that has a printing to pin the card preview next to that cell (anchored). Esc,
+              the preview close button, a click outside the grid and preview, or moving to an empty cell
+              unpins. Hover preview still uses a short dismiss delay when unpinned.
             </li>
           </ul>
         </SheetContent>
       </Sheet>
 
-      <footer className="text-center text-xs text-muted-foreground">
+      <footer className="shrink-0 text-center text-xs text-muted-foreground">
         Card data from{" "}
         <a className="underline" href="https://scryfall.com">
           Scryfall

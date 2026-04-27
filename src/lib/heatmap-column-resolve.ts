@@ -1,7 +1,8 @@
 import type Database from "better-sqlite3";
 import { POC_RELEASE_CUTOFF } from "@/lib/constants";
+import type { HeatmapFilters } from "@/lib/filter-state";
+import type { ColumnMeta } from "@/lib/heatmap-types";
 import { expandExcludeGroupTypes } from "@/lib/set-column-groups";
-import type { ColumnMeta, HeatmapFilters } from "@/lib/heatmap-query";
 
 function yearFromDate(d: string | null): number | null {
   if (!d) return null;
@@ -40,7 +41,6 @@ function sortColumnMeta(cols: ColumnMeta[], mode: string): ColumnMeta[] {
   }
 }
 
-/** Shared set/column filters (digital, allowlist, years, hidden sets, excluded types). */
 function appendColumnScopeFilters(
   f: HeatmapFilters,
   sql: string,
@@ -73,7 +73,13 @@ function appendColumnScopeFilters(
   return { sql: s, params: p };
 }
 
-/** Distinct columns for the full filtered card set (stable across pages). */
+function rowToMeta(r: Omit<ColumnMeta, "year">): ColumnMeta {
+  return { ...r, year: yearFromDate(r.release_date) };
+}
+
+/**
+ * §11.2.3–11.2.4 — Distinct heatmap columns for the full filtered card set (stable across pages).
+ */
 export function resolveHeatmapColumns(
   db: Database.Database,
   f: HeatmapFilters,
@@ -81,23 +87,59 @@ export function resolveHeatmapColumns(
   cardParams: unknown[],
   havingSql: string,
   havingParams: unknown[],
+  userId: string,
 ): ColumnMeta[] {
-  let colSql = `
+  let qualSql = `
     SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path
     FROM sets s
     INNER JOIN printings p ON p.set_code = s.code
     WHERE p.oracle_id IN (SELECT c.oracle_id FROM cards c WHERE ${cardPred} ${havingSql})
     AND (s.release_date IS NULL OR s.release_date <= ?)
   `;
-  const colParams: unknown[] = [...cardParams, ...havingParams, POC_RELEASE_CUTOFF];
-  const scoped = appendColumnScopeFilters(f, colSql, colParams);
-  colSql = `${scoped.sql} ORDER BY s.release_date ASC, s.code ASC`;
-  const distinctRows = db.prepare(colSql).all(...scoped.params) as Omit<ColumnMeta, "year">[];
-  return sortColumnMeta(
-    distinctRows.map((r) => ({
-      ...r,
-      year: yearFromDate(r.release_date),
-    })),
-    f.colSort,
-  );
+  const qualParams: unknown[] = [...cardParams, ...havingParams, POC_RELEASE_CUTOFF];
+  const qualScoped = appendColumnScopeFilters(f, qualSql, qualParams);
+  qualSql = `${qualScoped.sql} ORDER BY s.release_date ASC, s.code ASC`;
+  const qualRows = db.prepare(qualSql).all(...qualScoped.params) as Omit<ColumnMeta, "year">[];
+
+  const byCode = new Map<string, ColumnMeta>();
+  for (const r of qualRows) {
+    byCode.set(r.code, rowToMeta(r));
+  }
+
+  if (f.showEmptyColumns) {
+    let scopeSql = `
+      SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path
+      FROM sets s
+      WHERE (s.release_date IS NULL OR s.release_date <= ?)
+    `;
+    const scopeParams: unknown[] = [POC_RELEASE_CUTOFF];
+    const scopeScoped = appendColumnScopeFilters(f, scopeSql, scopeParams);
+    scopeSql = `${scopeScoped.sql} ORDER BY s.release_date ASC, s.code ASC`;
+    const scopeRows = db.prepare(scopeScoped.sql).all(...scopeScoped.params) as Omit<ColumnMeta, "year">[];
+    for (const r of scopeRows) {
+      if (!byCode.has(r.code)) byCode.set(r.code, rowToMeta(r));
+    }
+  }
+
+  if (f.showPinned) {
+    const known = [...byCode.keys()];
+    const notIn =
+      known.length > 0 ? `AND p.set_code NOT IN (${known.map(() => "?").join(",")})` : "";
+    const pinSql = `
+      SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path
+      FROM pinned pin
+      INNER JOIN printings p ON p.oracle_id = pin.oracle_id
+      INNER JOIN sets s ON s.code = p.set_code
+      WHERE pin.user_id = ? ${notIn}
+        AND (s.release_date IS NULL OR s.release_date <= ?)
+    `;
+    const pinParams: unknown[] = [userId, ...known, POC_RELEASE_CUTOFF];
+    const pinScoped = appendColumnScopeFilters(f, pinSql, pinParams);
+    const pinRows = db.prepare(pinScoped.sql).all(...pinScoped.params) as Omit<ColumnMeta, "year">[];
+    for (const r of pinRows) {
+      if (!byCode.has(r.code)) byCode.set(r.code, rowToMeta(r));
+    }
+  }
+
+  return sortColumnMeta([...byCode.values()], f.colSort);
 }

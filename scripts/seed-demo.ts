@@ -42,6 +42,10 @@ const cards = [
   },
 ];
 
+function scryfallImageTier(smallUrl: string, tier: "normal" | "large") {
+  return smallUrl.replace("/small/", `/${tier}/`);
+}
+
 const printings = [
   {
     scryfall_id: "lea-lotus",
@@ -51,6 +55,14 @@ const printings = [
     rarity: "rare",
     released_at: "1993-08-05",
     image_uri_small: "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000001.jpg",
+    image_uri_normal: scryfallImageTier(
+      "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000001.jpg",
+      "normal",
+    ),
+    image_uri_large: scryfallImageTier(
+      "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000001.jpg",
+      "large",
+    ),
     scryfall_uri: "https://scryfall.com/card/lea/1/black-lotus",
     tcgplayer_url: null as string | null,
     cardmarket_url: null as string | null,
@@ -63,6 +75,14 @@ const printings = [
     rarity: "rare",
     released_at: "1993-10-01",
     image_uri_small: "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000002.jpg",
+    image_uri_normal: scryfallImageTier(
+      "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000002.jpg",
+      "normal",
+    ),
+    image_uri_large: scryfallImageTier(
+      "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000002.jpg",
+      "large",
+    ),
     scryfall_uri: "https://scryfall.com/card/leb/1/black-lotus",
     tcgplayer_url: null,
     cardmarket_url: null,
@@ -75,6 +95,14 @@ const printings = [
     rarity: "common",
     released_at: "1993-12-01",
     image_uri_small: "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000003.jpg",
+    image_uri_normal: scryfallImageTier(
+      "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000003.jpg",
+      "normal",
+    ),
+    image_uri_large: scryfallImageTier(
+      "https://cards.scryfall.io/small/front/0/0/00000000-0000-0000-0000-000000000003.jpg",
+      "large",
+    ),
     scryfall_uri: "https://scryfall.com/card/2ed/104/dark-ritual",
     tcgplayer_url: null,
     cardmarket_url: null,
@@ -104,8 +132,8 @@ function main() {
   for (const c of cards) insCard.run(c);
 
   const insP = db.prepare(
-    `INSERT INTO printings (scryfall_id, oracle_id, set_code, collector_number, rarity, released_at, image_uri_small, scryfall_uri, tcgplayer_url, cardmarket_url, is_foil_only, is_nonfoil_only, is_promo, frame_effects, finishes)
-     VALUES (@scryfall_id,@oracle_id,@set_code,@collector_number,@rarity,@released_at,@image_uri_small,@scryfall_uri,@tcgplayer_url,@cardmarket_url,0,0,0,'[]','["nonfoil"]')`,
+    `INSERT INTO printings (scryfall_id, oracle_id, set_code, collector_number, rarity, released_at, image_uri_large, image_uri_normal, image_uri_small, scryfall_uri, tcgplayer_url, cardmarket_url, is_foil_only, is_nonfoil_only, is_promo, frame_effects, finishes)
+     VALUES (@scryfall_id,@oracle_id,@set_code,@collector_number,@rarity,@released_at,@image_uri_large,@image_uri_normal,@image_uri_small,@scryfall_uri,@tcgplayer_url,@cardmarket_url,0,0,0,'[]','["nonfoil"]')`,
   );
   for (const p of printings) insP.run(p);
 
