@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,6 +24,10 @@ import {
   type SavedView,
   upsertSavedView,
 } from "@/lib/saved-views";
+import { HEATMAP_FILTER_TIPS } from "@/lib/heatmap-filter-tips";
+import { FilterFieldTip } from "./FilterFieldTip";
+
+export type ViewSessionMeta = { activeViewId: string | null; snapshotQuery: string | null };
 
 type Props = {
   queryString: string;
@@ -34,6 +38,9 @@ type Props = {
   pageSize: number;
   onReplaceQuery: (params: URLSearchParams) => void;
   onOpenFullFilters: () => void;
+  activeViewId: string | null;
+  snapshotQuery: string | null;
+  onViewSessionChange: (m: ViewSessionMeta) => void;
 };
 
 function filtersFromQuery(qs: string): HeatmapFilters {
@@ -62,14 +69,27 @@ export function HeatmapFilterBar({
   pageSize,
   onReplaceQuery,
   onOpenFullFilters,
+  activeViewId,
+  snapshotQuery,
+  onViewSessionChange,
 }: Props) {
   const f = useMemo(() => filtersFromQuery(queryString), [queryString]);
-  const [savedViews, setSavedViews] = useState<SavedView[]>(() =>
-    typeof window !== "undefined" ? ensureSavedViewsLoaded() : [],
-  );
-  const [activeViewId, setActiveViewId] = useState<string | null>(null);
-  const [snapshotQuery, setSnapshotQuery] = useState<string | null>(null);
+  // Must match server first render ([]); loading localStorage in useEffect avoids hydration mismatch.
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [newName, setNewName] = useState("");
+
+  useEffect(() => {
+    startTransition(() => setSavedViews(ensureSavedViewsLoaded()));
+  }, []);
+
+  useEffect(() => {
+    if (!savedViews.length) return;
+    const hit = savedViews.find((v) => v.query === queryString);
+    if (!hit) return;
+    if (activeViewId === hit.id && snapshotQuery === hit.query) return;
+    if (activeViewId && snapshotQuery != null && queryString !== snapshotQuery) return;
+    startTransition(() => onViewSessionChange({ activeViewId: hit.id, snapshotQuery: hit.query }));
+  }, [queryString, savedViews, activeViewId, snapshotQuery, onViewSessionChange]);
 
   const dirty = useMemo(() => {
     if (!activeViewId || snapshotQuery == null) return false;
@@ -78,11 +98,10 @@ export function HeatmapFilterBar({
 
   const selectView = useCallback(
     (v: SavedView) => {
-      setActiveViewId(v.id);
-      setSnapshotQuery(v.query);
+      onViewSessionChange({ activeViewId: v.id, snapshotQuery: v.query });
       onReplaceQuery(new URLSearchParams(v.query));
     },
-    [onReplaceQuery],
+    [onReplaceQuery, onViewSessionChange],
   );
 
   const saveActiveView = useCallback(() => {
@@ -92,8 +111,8 @@ export function HeatmapFilterBar({
     );
     setSavedViews(next);
     persistSavedViews(next);
-    setSnapshotQuery(queryString);
-  }, [activeViewId, queryString, savedViews]);
+    onViewSessionChange({ activeViewId, snapshotQuery: queryString });
+  }, [activeViewId, queryString, savedViews, onViewSessionChange]);
 
   const createView = useCallback(() => {
     const name = newName.trim() || `View ${savedViews.length + 1}`;
@@ -104,10 +123,9 @@ export function HeatmapFilterBar({
     };
     const next = upsertSavedView(savedViews, v);
     setSavedViews(next);
-    setActiveViewId(v.id);
-    setSnapshotQuery(queryString);
+    onViewSessionChange({ activeViewId: v.id, snapshotQuery: queryString });
     setNewName("");
-  }, [newName, queryString, savedViews]);
+  }, [newName, queryString, savedViews, onViewSessionChange]);
 
   const patch = useCallback(
     (mut: (base: HeatmapFilters) => HeatmapFilters) => {
@@ -128,7 +146,10 @@ export function HeatmapFilterBar({
   const primarySort = f.sortSlots[0] ?? { key: "name" as const, dir: null };
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm">
+    <div
+      className="flex shrink-0 flex-col gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm"
+      suppressHydrationWarning
+    >
       <div className="flex flex-wrap items-center gap-2 border-b border-border pb-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Views</span>
         <div className="flex min-w-0 flex-1 flex-wrap gap-1">
@@ -170,59 +191,98 @@ export function HeatmapFilterBar({
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Filters</span>
-        <Badge variant="secondary" className="font-normal">
-          {f.rarity.length || f.yearMin != null || f.yearMax != null || f.priceMin != null || f.priceMax != null
-            ? "Facets on"
-            : "No row facets"}
-        </Badge>
+        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.facetsBadge} side="bottom">
+          <Badge variant="secondary" className="font-normal">
+            {f.rarity.length || f.yearMin != null || f.yearMax != null || f.priceMin != null || f.priceMax != null
+              ? "Facets on"
+              : "No row facets"}
+          </Badge>
+        </FilterFieldTip>
         <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={onOpenFullFilters}>
           Sheet filters…
         </Button>
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-          <Checkbox
-            checked={f.showEmptyColumns}
-            onCheckedChange={(v) => patch((b) => ({ ...b, showEmptyColumns: Boolean(v) }))}
-          />
-          Empty cols
-        </label>
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-          <Checkbox
-            checked={f.matchMode === "strict"}
-            onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
-          />
-          Strict cells
-        </label>
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-          <Checkbox
-            checked={f.showPinned}
-            onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))}
-          />
-          Pinned strip
-        </label>
+        <FilterFieldTip
+          tip={
+            f.heatmapColumnLayout === "value"
+              ? HEATMAP_FILTER_TIPS.heatmapColumnLayoutValue
+              : HEATMAP_FILTER_TIPS.heatmapColumnLayoutSets
+          }
+          side="bottom"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <span className="whitespace-nowrap text-xs text-muted-foreground">Heatmap</span>
+            <Select
+              value={f.heatmapColumnLayout}
+              onValueChange={(v) =>
+                patch((b) => ({
+                  ...b,
+                  heatmapColumnLayout: v === "value" ? "value" : "sets",
+                }))
+              }
+            >
+              <SelectTrigger className="h-7 w-[11.5rem] text-xs">
+                <SelectValue placeholder="Column layout" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sets">One column per set</SelectItem>
+                <SelectItem value="value">Min / med / max</SelectItem>
+              </SelectContent>
+            </Select>
+          </span>
+        </FilterFieldTip>
+        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.showEmptyColumns}>
+          <label className="flex cursor-help items-center gap-1.5 text-xs">
+            <Checkbox
+              checked={f.showEmptyColumns}
+              onCheckedChange={(v) => patch((b) => ({ ...b, showEmptyColumns: Boolean(v) }))}
+            />
+            Empty columns
+          </label>
+        </FilterFieldTip>
+        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.matchStrict}>
+          <label className="flex cursor-help items-center gap-1.5 text-xs">
+            <Checkbox
+              checked={f.matchMode === "strict"}
+              onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
+            />
+            Strict cells
+          </label>
+        </FilterFieldTip>
+        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.showPinnedStrip}>
+          <label className="flex cursor-help items-center gap-1.5 text-xs">
+            <Checkbox
+              checked={f.showPinned}
+              onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))}
+            />
+            Pinned strip
+          </label>
+        </FilterFieldTip>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sort</span>
-        <Select
-          value={primarySort.key}
-          onValueChange={(key) => {
-            const k = key as SortSlot["key"];
-            const dir: SortSlot["dir"] =
-              k === "price_min" ? "asc" : k.startsWith("price_") ? "desc" : null;
-            setSortSlots([{ key: k, dir }]);
-          }}
-        >
-          <SelectTrigger className="h-7 w-[10.5rem] text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(SORT_LABEL) as SortSlot["key"][]).map((k) => (
-              <SelectItem key={k} value={k}>
-                {SORT_LABEL[k]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.primarySort} side="top">
+          <Select
+            value={primarySort.key}
+            onValueChange={(key) => {
+              const k = key as SortSlot["key"];
+              const dir: SortSlot["dir"] =
+                k === "price_min" ? "asc" : k.startsWith("price_") ? "desc" : null;
+              setSortSlots([{ key: k, dir }]);
+            }}
+          >
+            <SelectTrigger className="h-7 w-[10.5rem] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(SORT_LABEL) as SortSlot["key"][]).map((k) => (
+                <SelectItem key={k} value={k}>
+                  {SORT_LABEL[k]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FilterFieldTip>
         {primarySort.key.startsWith("price_") ? (
           <Select
             value={primarySort.dir ?? (primarySort.key === "price_min" ? "asc" : "desc")}
@@ -240,18 +300,23 @@ export function HeatmapFilterBar({
             </SelectContent>
           </Select>
         ) : null}
-        <Select
-          value={f.valueAggScope}
-          onValueChange={(v) => patch((b) => ({ ...b, valueAggScope: v === "all" ? "all" : "visible" }))}
+        <FilterFieldTip
+          tip={f.valueAggScope === "all" ? HEATMAP_FILTER_TIPS.valueAggAll : HEATMAP_FILTER_TIPS.valueAggVisible}
+          side="top"
         >
-          <SelectTrigger className="h-7 w-36 text-xs" title="Price aggregate scope for row sort">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="visible">$ in visible cols</SelectItem>
-            <SelectItem value="all">$ all printings</SelectItem>
-          </SelectContent>
-        </Select>
+          <Select
+            value={f.valueAggScope}
+            onValueChange={(v) => patch((b) => ({ ...b, valueAggScope: v === "all" ? "all" : "visible" }))}
+          >
+            <SelectTrigger className="h-7 w-36 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="visible">$ in visible cols</SelectItem>
+              <SelectItem value="all">$ all printings</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterFieldTip>
         {f.sortSlots.length > 1 ? (
           <span className="text-xs text-muted-foreground">
             +{f.sortSlots.length - 1} tiebreak{""}
@@ -271,51 +336,55 @@ export function HeatmapFilterBar({
             </button>
           </Badge>
         ) : null}
-        {columns.length > 0 ? (
-          <Select
-            value="__none__"
-            onValueChange={(code) => {
-              if (code === "__none__") return;
-              patch((b) => ({ ...b, headerSortSetCode: code }));
-            }}
-          >
-            <SelectTrigger className="h-7 w-[11rem] text-xs" title="§11.5.6 column price sort">
-              <SelectValue placeholder="Sort by column…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">Sort by column…</SelectItem>
-              {columns.map((c) => (
-                <SelectItem key={c.code} value={c.code}>
-                  {c.code.toUpperCase()} — {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {columns.length > 0 && columns[0]?.set_type !== "aggregate" ? (
+          <FilterFieldTip tip={HEATMAP_FILTER_TIPS.headerColumnSort} side="top">
+            <Select
+              value="__none__"
+              onValueChange={(code) => {
+                if (code === "__none__") return;
+                patch((b) => ({ ...b, headerSortSetCode: code }));
+              }}
+            >
+              <SelectTrigger className="h-7 w-[11rem] text-xs">
+                <SelectValue placeholder="Sort by column…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Sort by column…</SelectItem>
+                {columns.map((c) => (
+                  <SelectItem key={c.code} value={c.code}>
+                    {c.code.toUpperCase()} — {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FilterFieldTip>
         ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Group</span>
-        <Select
-          value={f.groupBy}
-          onValueChange={(v) =>
-            patch((b) => ({
-              ...b,
-              groupBy: v === "reserved" || v === "color" || v === "type" ? v : "none",
-              groupCollapsedKeys: [],
-            }))
-          }
-        >
-          <SelectTrigger className="h-7 w-36 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">None</SelectItem>
-            <SelectItem value="reserved">Reserved</SelectItem>
-            <SelectItem value="color">Color (CI)</SelectItem>
-            <SelectItem value="type">Type prefix</SelectItem>
-          </SelectContent>
-        </Select>
+        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.groupBy} side="top">
+          <Select
+            value={f.groupBy}
+            onValueChange={(v) =>
+              patch((b) => ({
+                ...b,
+                groupBy: v === "reserved" || v === "color" || v === "type" ? v : "none",
+                groupCollapsedKeys: [],
+              }))
+            }
+          >
+            <SelectTrigger className="h-7 w-36 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None</SelectItem>
+              <SelectItem value="reserved">Reserved</SelectItem>
+              <SelectItem value="color">Color (CI)</SelectItem>
+              <SelectItem value="type">Type prefix</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterFieldTip>
         {f.groupCollapsedKeys.length ? (
           <Button
             type="button"
@@ -333,7 +402,16 @@ export function HeatmapFilterBar({
         <span>
           <span className="font-medium text-foreground">{total.toLocaleString()}</span> cards match · showing{" "}
           <span className="font-medium text-foreground">{rowCount.toLocaleString()}</span> on page{" "}
-          <span className="font-mono">{page + 1}</span> ({pageSize}/page) · match: {f.matchMode}
+          <span className="font-mono">{page + 1}</span> ({pageSize}/page) ·{" "}
+          <FilterFieldTip
+            tip={HEATMAP_FILTER_TIPS.matchFooter}
+            side="top"
+            className="underline decoration-dotted decoration-muted-foreground/70 underline-offset-2"
+          >
+            <span>
+              match: {f.matchMode}
+            </span>
+          </FilterFieldTip>
         </span>
         {activeViewId ? (
           <div className="flex gap-1">
@@ -358,8 +436,7 @@ export function HeatmapFilterBar({
                 if (!activeViewId) return;
                 const next = deleteSavedView(savedViews, activeViewId);
                 setSavedViews(next);
-                setActiveViewId(null);
-                setSnapshotQuery(null);
+                onViewSessionChange({ activeViewId: null, snapshotQuery: null });
               }}
             >
               Delete

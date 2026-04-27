@@ -14,7 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SetIcon } from "@/components/heatmap/SetIcon";
+import { HEATMAP_FILTER_TIPS } from "@/lib/heatmap-filter-tips";
 import { normalizedColSort } from "@/lib/heatmap-url-params";
+import { FilterFieldTip } from "./FilterFieldTip";
 
 type CatalogSet = {
   code: string;
@@ -106,24 +108,50 @@ export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Columns
         </h3>
-        <div className="space-y-2">
-          <Label>Column order</Label>
-          <Select
-            value={colSortSelectValue}
-            onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Order" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="release">Release date (oldest → newest)</SelectItem>
-              <SelectItem value="release_desc">Release date (newest → oldest)</SelectItem>
-              <SelectItem value="code">Set code (A–Z)</SelectItem>
-              <SelectItem value="name">Set name (A–Z)</SelectItem>
-              <SelectItem value="type_release">Set type, then release</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.columnOrder} side="right">
+          <div className="cursor-help space-y-2">
+            <Label>Column order</Label>
+            <Select
+              value={colSortSelectValue}
+              onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Order" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="release">Release date (oldest → newest)</SelectItem>
+                <SelectItem value="release_desc">Release date (newest → oldest)</SelectItem>
+                <SelectItem value="code">Set code (A–Z)</SelectItem>
+                <SelectItem value="name">Set name (A–Z)</SelectItem>
+                <SelectItem value="type_release">Set type, then release</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </FilterFieldTip>
+        <FilterFieldTip
+          tip={
+            sp.get("hlay") === "value"
+              ? HEATMAP_FILTER_TIPS.heatmapColumnLayoutValue
+              : HEATMAP_FILTER_TIPS.heatmapColumnLayoutSets
+          }
+          side="right"
+        >
+          <div className="mt-4 cursor-help space-y-2">
+            <Label>Heatmap columns</Label>
+            <Select
+              value={sp.get("hlay") === "value" ? "value" : "sets"}
+              onValueChange={(v) => setParam("hlay", v === "value" ? "value" : null)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Layout" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sets">One column per set</SelectItem>
+                <SelectItem value="value">Min, median, and max (one column each)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </FilterFieldTip>
       </div>
 
       <Separator />

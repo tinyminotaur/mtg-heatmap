@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "@/components/app-theme-provider";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -25,14 +25,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
+import { HEATMAP_FILTER_TIPS } from "@/lib/heatmap-filter-tips";
 import { cardImageUrlForDetail, cardImageUrlForPreview } from "@/lib/card-image-urls";
+import { readHeatmapSession, writeHeatmapSession } from "@/lib/heatmap-session";
 import { formatPriceKind, getHeatmapPriceRange } from "@/lib/heatmap-best-deal";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
-import type { PriceMode } from "@/lib/price-scale";
-import { normalizedColSort, normalizedRowSort, parseHeatmapUrlSearchParams } from "@/lib/heatmap-url-params";
+import { cellEligibleForHeatmapHoverPreview, type PriceMode } from "@/lib/price-scale";
+import {
+  normalizedColSort,
+  normalizedRowSort,
+  parseHeatmapCellPriceField,
+  parseHeatmapUrlSearchParams,
+} from "@/lib/heatmap-url-params";
 import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
-import { HeatmapFilterBar } from "./HeatmapFilterBar";
+import { HeatmapFilterBar, type ViewSessionMeta } from "./HeatmapFilterBar";
 import { HeatmapFilterColumns } from "./HeatmapFilterColumns";
+import { FilterFieldTip } from "./FilterFieldTip";
 import { HeatmapGrid, type HeatmapCellAnchorRect, type HeatmapGridHandle } from "./HeatmapGrid";
 import { Legend } from "./Legend";
 import { Separator } from "@/components/ui/separator";
@@ -40,7 +49,17 @@ import { Maximize2, X } from "lucide-react";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(String(res.status));
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = (await res.json()) as { message?: string; error?: string };
+      if (body.message) detail = `${res.status}: ${body.message}`;
+      else if (body.error) detail = `${res.status}: ${body.error}`;
+    } catch {
+      /* ignore non-JSON error bodies */
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 
@@ -187,18 +206,14 @@ export function HeatmapView() {
 
   const queryString = useMemo(() => sp.toString(), [sp]);
   const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
-  const rowSortSelectValue = useMemo(() => {
-    const raw = (sp.get("sort") ?? "").split(":")[0]?.trim();
-    if (raw === "price_avg") return "price_median";
-    return normalizedRowSort(sp);
-  }, [sp]);
+  const heatmapColumnLayout = useMemo(() => parseHeatmapUrlSearchParams(sp).heatmapColumnLayout, [sp]);
 
   const { data, isLoading, error } = useQuery<HeatmapResponse>({
     queryKey: ["heatmap", queryString],
     queryFn: () => fetchJson(`/api/heatmap?${queryString}`),
   });
 
-  const [priceMode, setPriceMode] = useState<PriceMode>("usd");
+  const priceMode = useMemo(() => parseHeatmapCellPriceField(sp) as PriceMode, [sp]);
   const [selR, setSelR] = useState(0);
   const [selC, setSelC] = useState(0);
   const [hover, setHover] = useState<{
@@ -235,10 +250,24 @@ export function HeatmapView() {
     hoverDismissRef.current = setTimeout(() => setHover(null), 450);
   }, [cancelHoverDismiss]);
 
+  /** Immediate hover clear (leaving the grid port or a non-preview cell). */
+  const clearHoverNow = useCallback(() => {
+    cancelHoverDismiss();
+    setHover(null);
+  }, [cancelHoverDismiss]);
+
   useEffect(() => {
     return () => cancelHoverDismiss();
   }, [cancelHoverDismiss]);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filterSheet, setFilterSheet] = useState<{ open: boolean; draft: URLSearchParams | null }>({
+    open: false,
+    draft: null,
+  });
+  const [viewSession, setViewSession] = useState<ViewSessionMeta>({
+    activeViewId: null,
+    snapshotQuery: null,
+  });
+  const sessionBootstrapped = useRef(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const goPending = useRef(false);
@@ -248,7 +277,10 @@ export function HeatmapView() {
   const columns = useMemo(() => data?.columns ?? [], [data?.columns]);
   const total = data?.total ?? 0;
   const page = Math.max(0, Number(sp.get("page") ?? 0) || 0);
-  const pageSize = Math.min(1500, Math.max(1, Number(sp.get("pageSize") ?? 1000) || 1000));
+  const pageSize = Math.min(
+    HEATMAP_MAX_PAGE_SIZE,
+    Math.max(1, Number(sp.get("pageSize") ?? HEATMAP_MAX_PAGE_SIZE) || HEATMAP_MAX_PAGE_SIZE),
+  );
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const setParam = useCallback(
@@ -278,6 +310,85 @@ export function HeatmapView() {
     [router],
   );
 
+  useEffect(() => {
+    if (sessionBootstrapped.current) return;
+    sessionBootstrapped.current = true;
+    const snap = readHeatmapSession();
+    startTransition(() => {
+      if (snap) setViewSession({ activeViewId: snap.activeViewId, snapshotQuery: snap.snapshotQuery });
+    });
+    const q = window.location.search.replace(/^\?/, "");
+    if (snap?.search && q === "") router.replace(`/?${snap.search}`);
+  }, [router]);
+
+  useEffect(() => {
+    writeHeatmapSession({
+      search: sp.toString(),
+      activeViewId: viewSession.activeViewId,
+      snapshotQuery: viewSession.snapshotQuery,
+    });
+  }, [sp, viewSession]);
+
+  const persistSessionNav = useCallback(() => {
+    writeHeatmapSession({
+      search: sp.toString(),
+      activeViewId: viewSession.activeViewId,
+      snapshotQuery: viewSession.snapshotQuery,
+    });
+  }, [sp, viewSession]);
+
+  const sheetSetParam = useCallback((key: string, value: string | null) => {
+    setFilterSheet((fs) => {
+      if (!fs.draft) return fs;
+      const d = new URLSearchParams(fs.draft.toString());
+      if (value === null || value === "") d.delete(key);
+      else d.set(key, value);
+      return { ...fs, draft: d };
+    });
+  }, []);
+
+  const openFilterSheet = useCallback(() => {
+    setFilterSheet({ open: true, draft: new URLSearchParams(sp.toString()) });
+  }, [sp]);
+
+  const applyFilterSheet = useCallback(() => {
+    setFilterSheet((fs) => {
+      if (fs.draft) replaceQuery(fs.draft);
+      return { open: false, draft: null };
+    });
+  }, [replaceQuery]);
+
+  const toggleFilterSheet = useCallback(() => {
+    setFilterSheet((s) =>
+      s.open ? { open: false, draft: null } : { open: true, draft: new URLSearchParams(sp.toString()) },
+    );
+  }, [sp]);
+
+  const sheetSp = useMemo(() => {
+    if (filterSheet.open && filterSheet.draft) return filterSheet.draft;
+    return new URLSearchParams(sp.toString());
+  }, [filterSheet.open, filterSheet.draft, sp]);
+
+  const sheetQueryString = useMemo(() => sheetSp.toString(), [sheetSp]);
+
+  const sheetRowSortSelectValue = useMemo(() => normalizedRowSort(sheetSp), [sheetSp]);
+
+  const sheetRaritySet = useMemo(
+    () => new Set(sheetSp.get("rarity")?.split(",").filter(Boolean) ?? []),
+    [sheetSp],
+  );
+
+  const toggleSheetRarity = useCallback(
+    (r: string) => {
+      const next = new Set(sheetRaritySet);
+      if (next.has(r)) next.delete(r);
+      else next.add(r);
+      const v = [...next].join(",");
+      sheetSetParam("rarity", v || null);
+    },
+    [sheetRaritySet, sheetSetParam],
+  );
+
   const heatmapMatchMode = useMemo(
     () => (parseHeatmapUrlSearchParams(sp).matchMode === "strict" ? "strict" : "context"),
     [sp],
@@ -288,6 +399,14 @@ export function HeatmapView() {
   const rowIndex = rows.length ? Math.min(Math.max(0, selR), maxR) : 0;
   const colIndex = columns.length ? Math.min(Math.max(0, selC), maxC) : 0;
   const selectionCell = rows.length ? (rows[rowIndex]?.cells[colIndex] ?? null) : null;
+
+  useEffect(() => {
+    if (!rows.length || !columns.length) return;
+    const id = requestAnimationFrame(() => {
+      heatmapGridRef.current?.scrollCellIntoView(rowIndex, colIndex);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [rowIndex, colIndex, rows.length, columns.length]);
 
   const bumpPinnedAnchor = useCallback(() => {
     if (previewPinned) setAnchorEpoch((n) => n + 1);
@@ -379,19 +498,6 @@ export function HeatmapView() {
     if (uri) window.open(uri, "_blank", "noopener,noreferrer");
   }, [rows, colIndex, rowIndex]);
 
-  const raritySet = useMemo(() => new Set(sp.get("rarity")?.split(",").filter(Boolean) ?? []), [sp]);
-
-  const toggleRarity = useCallback(
-    (r: string) => {
-      const next = new Set(raritySet);
-      if (next.has(r)) next.delete(r);
-      else next.add(r);
-      const v = [...next].join(",");
-      setParam("rarity", v || null);
-    },
-    [raritySet, setParam],
-  );
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
@@ -417,7 +523,7 @@ export function HeatmapView() {
         }
         setCmdOpen(false);
         setHelpOpen(false);
-        setFiltersOpen(false);
+        setFilterSheet({ open: false, draft: null });
         cancelHoverDismiss();
         setHover(null);
         return;
@@ -456,9 +562,16 @@ export function HeatmapView() {
         e.preventDefault();
         goPending.current = false;
         const k = e.key.toLowerCase();
-        if (k === "o") router.push("/owned");
-        else if (k === "w") router.push("/watchlist");
-        else router.push("/");
+        if (k === "o") {
+          persistSessionNav();
+          router.push("/owned");
+        } else if (k === "w") {
+          persistSessionNav();
+          router.push("/watchlist");
+        } else {
+          persistSessionNav();
+          router.push("/");
+        }
         return;
       }
 
@@ -493,7 +606,7 @@ export function HeatmapView() {
       }
       if (e.key === "f" || e.key === "F") {
         e.preventDefault();
-        setFiltersOpen((v) => !v);
+        toggleFilterSheet();
       }
       if (e.key === "/") {
         e.preventDefault();
@@ -513,8 +626,10 @@ export function HeatmapView() {
     columns.length,
     decOwned,
     openScryfallSelection,
+    persistSessionNav,
     router,
     rows.length,
+    toggleFilterSheet,
     toggleOwned,
     togglePin,
     toggleWatch,
@@ -570,7 +685,7 @@ export function HeatmapView() {
       <HeatmapCommandPalette
         open={cmdOpen}
         onOpenChange={setCmdOpen}
-        onOpenFilters={() => setFiltersOpen(true)}
+        onOpenFilters={() => openFilterSheet()}
         onOpenHelp={() => setHelpOpen(true)}
         onApplySearch={(q) => setParam("q", q)}
       />
@@ -584,10 +699,18 @@ export function HeatmapView() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Link href="/owned" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+          <Link
+            href="/owned"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            onClick={() => persistSessionNav()}
+          >
             Owned
           </Link>
-          <Link href="/watchlist" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+          <Link
+            href="/watchlist"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            onClick={() => persistSessionNav()}
+          >
             Watchlist
           </Link>
           <button
@@ -597,199 +720,269 @@ export function HeatmapView() {
           >
             ⌘K
           </button>
-          <Select
-            value={colSortSelectValue}
-            onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
+          <FilterFieldTip tip={HEATMAP_FILTER_TIPS.columnOrder} side="bottom">
+            <Select
+              value={colSortSelectValue}
+              onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
+            >
+              <SelectTrigger className="h-9 w-[min(100vw-8rem,11rem)] text-xs">
+                <SelectValue placeholder="Columns" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="release">Cols: release ↑</SelectItem>
+                <SelectItem value="release_desc">Cols: release ↓</SelectItem>
+                <SelectItem value="code">Cols: set code</SelectItem>
+                <SelectItem value="name">Cols: set name</SelectItem>
+                <SelectItem value="type_release">Cols: type + date</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterFieldTip>
+          <FilterFieldTip
+            tip={
+              heatmapColumnLayout === "value"
+                ? HEATMAP_FILTER_TIPS.heatmapColumnLayoutValue
+                : HEATMAP_FILTER_TIPS.heatmapColumnLayoutSets
+            }
+            side="bottom"
           >
-            <SelectTrigger
-              className="h-9 w-[min(100vw-8rem,11rem)] text-xs"
-              title="Column order (sets left → right)"
+            <Select
+              value={heatmapColumnLayout}
+              onValueChange={(v) => setParam("hlay", v === "value" ? "value" : null)}
             >
-              <SelectValue placeholder="Columns" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="release">Cols: release ↑</SelectItem>
-              <SelectItem value="release_desc">Cols: release ↓</SelectItem>
-              <SelectItem value="code">Cols: set code</SelectItem>
-              <SelectItem value="name">Cols: set name</SelectItem>
-              <SelectItem value="type_release">Cols: type + date</SelectItem>
-            </SelectContent>
-          </Select>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
-            >
-              Price: {priceMode}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {(["usd", "usd_foil", "eur", "tix"] as const).map((m) => (
-                <DropdownMenuItem key={m} onClick={() => setPriceMode(m)}>
-                  {m}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+              <SelectTrigger className="h-9 w-[min(100vw-8rem,12.5rem)] text-xs">
+                <SelectValue placeholder="Heatmap columns" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sets">Heatmap: one column per set</SelectItem>
+                <SelectItem value="value">Heatmap: min / med / max</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterFieldTip>
+          <FilterFieldTip tip={HEATMAP_FILTER_TIPS.priceMode} side="bottom">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+              >
+                Price: {priceMode}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {(["usd", "usd_foil", "eur", "tix"] as const).map((m) => (
+                  <DropdownMenuItem
+                    key={m}
+                    onClick={() => setParam("pm", m === "usd" ? null : m)}
+                  >
+                    {m}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </FilterFieldTip>
+          <Sheet
+            open={filterSheet.open}
+            onOpenChange={(open) => {
+              if (open) {
+                setFilterSheet({ open: true, draft: new URLSearchParams(sp.toString()) });
+              } else {
+                setFilterSheet({ open: false, draft: null });
+              }
+            }}
+          >
             <SheetTrigger className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
               Filters (F)
             </SheetTrigger>
-            <SheetContent className="overflow-y-auto">
-              <SheetHeader>
-                <SheetTitle>Filters</SheetTitle>
-              </SheetHeader>
-              <div className="mt-4 space-y-5 text-sm">
-                <HeatmapFilterColumns searchParamsString={queryString} setParam={setParam} />
-                <Separator />
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Row filters
-                </p>
-                <div className="space-y-2">
-                  <Label htmlFor="heatmap-search">Search</Label>
-                  <Input
-                    id="heatmap-search"
-                    value={sp.get("q") ?? ""}
-                    onChange={(e) => setParam("q", e.target.value || null)}
-                    placeholder="Card name contains…"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Sort rows</Label>
-                  <Select value={rowSortSelectValue} onValueChange={(v) => setParam("sort", v)}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="name">Name (A–Z)</SelectItem>
-                      <SelectItem value="printings">Print count (most first)</SelectItem>
-                      <SelectItem value="reserved">Reserved first</SelectItem>
-                      <SelectItem value="price_min">USD: min</SelectItem>
-                      <SelectItem value="price_median">USD: median</SelectItem>
-                      <SelectItem value="price_max">USD: max</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Uses <span className="font-mono">COALESCE(usd, usd_foil)</span> with the global
-                    heatmap column list (see chip bar for visible vs all printings). Max / min / median
-                    × asc/desc; multi-sort via URL <span className="font-mono">sk=</span>.
+            <SheetContent className="flex max-h-[100dvh] flex-col overflow-hidden p-0">
+              <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                <SheetHeader>
+                  <SheetTitle>Filters</SheetTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Edits stay local until you apply — heatmap only refetches once.
                   </p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="yMin">Year min</Label>
-                    <Input
-                      key={`yearMin-${sp.get("yearMin") ?? ""}`}
-                      id="yMin"
-                      type="number"
-                      defaultValue={sp.get("yearMin") ?? ""}
-                      onBlur={(e) => setParam("yearMin", e.target.value.trim() || null)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="yMax">Year max</Label>
-                    <Input
-                      key={`yearMax-${sp.get("yearMax") ?? ""}`}
-                      id="yMax"
-                      type="number"
-                      defaultValue={sp.get("yearMax") ?? ""}
-                      onBlur={(e) => setParam("yearMax", e.target.value.trim() || null)}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="pMin">Price min (USD)</Label>
-                    <Input
-                      key={`priceMin-${sp.get("priceMin") ?? ""}`}
-                      id="pMin"
-                      type="number"
-                      step="0.01"
-                      defaultValue={sp.get("priceMin") ?? ""}
-                      onBlur={(e) => setParam("priceMin", e.target.value.trim() || null)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="pMax">Price max (USD)</Label>
-                    <Input
-                      key={`priceMax-${sp.get("priceMax") ?? ""}`}
-                      id="pMax"
-                      type="number"
-                      step="0.01"
-                      defaultValue={sp.get("priceMax") ?? ""}
-                      onBlur={(e) => setParam("priceMax", e.target.value.trim() || null)}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Rarity</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {RARITIES.map((r) => (
-                      <label key={r} className="flex items-center gap-1.5 capitalize">
-                        <Checkbox
-                          checked={raritySet.has(r)}
-                          onCheckedChange={() => toggleRarity(r)}
+                </SheetHeader>
+                <div className="mt-4 space-y-5 text-sm">
+                  <HeatmapFilterColumns searchParamsString={sheetQueryString} setParam={sheetSetParam} />
+                  <Separator />
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Row filters
+                  </p>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetSearch} side="right">
+                    <div className="cursor-help space-y-2">
+                      <Label htmlFor="heatmap-search">Search</Label>
+                      <Input
+                        id="heatmap-search"
+                        value={sheetSp.get("q") ?? ""}
+                        onChange={(e) => sheetSetParam("q", e.target.value || null)}
+                        placeholder="Card name contains…"
+                      />
+                    </div>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.primarySort} side="right">
+                    <div className="cursor-help space-y-2">
+                      <Label>Sort rows</Label>
+                      <Select value={sheetRowSortSelectValue} onValueChange={(v) => sheetSetParam("sort", v)}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="name">Name (A–Z)</SelectItem>
+                          <SelectItem value="printings">Print count (most first)</SelectItem>
+                          <SelectItem value="reserved">Reserved first</SelectItem>
+                          <SelectItem value="price_min">USD: min</SelectItem>
+                          <SelectItem value="price_median">USD: median</SelectItem>
+                          <SelectItem value="price_max">USD: max</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Uses <span className="font-mono">COALESCE(usd, usd_foil)</span> with the global
+                        heatmap column list (see chip bar for visible vs all printings). Max / min / median
+                        × asc/desc; multi-sort via URL <span className="font-mono">sk=</span>.
+                      </p>
+                    </div>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetYear} side="right">
+                    <div className="cursor-help grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="yMin">Year min</Label>
+                        <Input
+                          id="yMin"
+                          type="number"
+                          value={sheetSp.get("yearMin") ?? ""}
+                          onChange={(e) => sheetSetParam("yearMin", e.target.value.trim() || null)}
                         />
-                        {r}
-                      </label>
-                    ))}
-                  </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="yMax">Year max</Label>
+                        <Input
+                          id="yMax"
+                          type="number"
+                          value={sheetSp.get("yearMax") ?? ""}
+                          onChange={(e) => sheetSetParam("yearMax", e.target.value.trim() || null)}
+                        />
+                      </div>
+                    </div>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetPrice} side="right">
+                    <div className="cursor-help grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="pMin">Price min (USD)</Label>
+                        <Input
+                          id="pMin"
+                          type="number"
+                          step="0.01"
+                          value={sheetSp.get("priceMin") ?? ""}
+                          onChange={(e) => sheetSetParam("priceMin", e.target.value.trim() || null)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="pMax">Price max (USD)</Label>
+                        <Input
+                          id="pMax"
+                          type="number"
+                          step="0.01"
+                          value={sheetSp.get("priceMax") ?? ""}
+                          onChange={(e) => sheetSetParam("priceMax", e.target.value.trim() || null)}
+                        />
+                      </div>
+                    </div>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetRarity} side="right">
+                    <div className="cursor-help space-y-2">
+                      <Label>Rarity</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {RARITIES.map((r) => (
+                          <label key={r} className="flex items-center gap-1.5 capitalize">
+                            <Checkbox
+                              checked={sheetRaritySet.has(r)}
+                              onCheckedChange={() => toggleSheetRarity(r)}
+                            />
+                            {r}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.includeDigital}>
+                    <label htmlFor="dig" className="flex cursor-help items-center gap-2">
+                      <Checkbox
+                        id="dig"
+                        checked={sheetSp.get("digital") === "1"}
+                        onCheckedChange={(v) => sheetSetParam("digital", v ? "1" : null)}
+                      />
+                      <span>Include digital sets</span>
+                    </label>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.reservedListOnly}>
+                    <label htmlFor="res" className="flex cursor-help items-center gap-2">
+                      <Checkbox
+                        id="res"
+                        checked={sheetSp.get("reserved") === "1"}
+                        onCheckedChange={(v) => sheetSetParam("reserved", v ? "1" : null)}
+                      />
+                      <span>Reserved List only</span>
+                    </label>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.ownedOnly}>
+                    <label htmlFor="owned" className="flex cursor-help items-center gap-2">
+                      <Checkbox
+                        id="owned"
+                        checked={sheetSp.get("owned") === "1"}
+                        onCheckedChange={(v) => sheetSetParam("owned", v ? "1" : null)}
+                      />
+                      <span>Owned only</span>
+                    </label>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.watchlistOnly}>
+                    <label htmlFor="wl" className="flex cursor-help items-center gap-2">
+                      <Checkbox
+                        id="wl"
+                        checked={sheetSp.get("watchlist") === "1"}
+                        onCheckedChange={(v) => sheetSetParam("watchlist", v ? "1" : null)}
+                      />
+                      <span>Watchlist only</span>
+                    </label>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.pinnedOnly}>
+                    <label htmlFor="pin" className="flex cursor-help items-center gap-2">
+                      <Checkbox
+                        id="pin"
+                        checked={sheetSp.get("pinned") === "1"}
+                        onCheckedChange={(v) => sheetSetParam("pinned", v ? "1" : null)}
+                      />
+                      <span>Pinned only</span>
+                    </label>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.hidePinnedStrip}>
+                    <label htmlFor="hidePin" className="flex cursor-help items-center gap-2">
+                      <Checkbox
+                        id="hidePin"
+                        checked={sheetSp.get("hidePinned") === "1"}
+                        onCheckedChange={(v) => sheetSetParam("hidePinned", v ? "1" : null)}
+                      />
+                      <span>Hide pinned strip</span>
+                    </label>
+                  </FilterFieldTip>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.specialGroup} side="right">
+                    <div className="cursor-help space-y-2">
+                      <Label>Special group slug</Label>
+                      <Input
+                        value={sheetSp.get("group") ?? ""}
+                        onChange={(e) => sheetSetParam("group", e.target.value.trim() || null)}
+                        placeholder="e.g. power_nine"
+                      />
+                    </div>
+                  </FilterFieldTip>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="dig"
-                    checked={sp.get("digital") === "1"}
-                    onCheckedChange={(v) => setParam("digital", v ? "1" : null)}
-                  />
-                  <Label htmlFor="dig">Include digital sets</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="res"
-                    checked={sp.get("reserved") === "1"}
-                    onCheckedChange={(v) => setParam("reserved", v ? "1" : null)}
-                  />
-                  <Label htmlFor="res">Reserved List only</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="owned"
-                    checked={sp.get("owned") === "1"}
-                    onCheckedChange={(v) => setParam("owned", v ? "1" : null)}
-                  />
-                  <Label htmlFor="owned">Owned only</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="wl"
-                    checked={sp.get("watchlist") === "1"}
-                    onCheckedChange={(v) => setParam("watchlist", v ? "1" : null)}
-                  />
-                  <Label htmlFor="wl">Watchlist only</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="pin"
-                    checked={sp.get("pinned") === "1"}
-                    onCheckedChange={(v) => setParam("pinned", v ? "1" : null)}
-                  />
-                  <Label htmlFor="pin">Pinned only</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="hidePin"
-                    checked={sp.get("hidePinned") === "1"}
-                    onCheckedChange={(v) => setParam("hidePinned", v ? "1" : null)}
-                  />
-                  <Label htmlFor="hidePin">Hide pinned strip</Label>
-                </div>
-                <div className="space-y-2">
-                  <Label>Special group slug</Label>
-                  <Input
-                    key={`group-${sp.get("group") ?? ""}`}
-                    defaultValue={sp.get("group") ?? ""}
-                    onBlur={(e) => setParam("group", e.target.value.trim() || null)}
-                    placeholder="e.g. power_nine"
-                  />
-                </div>
+              </div>
+              <div className="flex shrink-0 gap-2 border-t border-border bg-background p-4">
+                <Button type="button" className="flex-1" onClick={() => applyFilterSheet()}>
+                  Apply filters
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setFilterSheet({ open: false, draft: null })}
+                >
+                  Cancel
+                </Button>
               </div>
             </SheetContent>
           </Sheet>
@@ -804,7 +997,10 @@ export function HeatmapView() {
         page={page}
         pageSize={pageSize}
         onReplaceQuery={replaceQuery}
-        onOpenFullFilters={() => setFiltersOpen(true)}
+        onOpenFullFilters={() => openFilterSheet()}
+        activeViewId={viewSession.activeViewId}
+        snapshotQuery={viewSession.snapshotQuery}
+        onViewSessionChange={setViewSession}
       />
 
       <div className="shrink-0">
@@ -845,7 +1041,12 @@ export function HeatmapView() {
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : error ? (
-          <p className="text-sm text-destructive">Failed to load heatmap.</p>
+          <div className="text-sm text-destructive">
+            <p>Failed to load heatmap.</p>
+            {error instanceof Error && error.message !== "500" ? (
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{error.message}</p>
+            ) : null}
+          </div>
         ) : (
           <HeatmapGrid
             ref={heatmapGridRef}
@@ -860,13 +1061,19 @@ export function HeatmapView() {
               setSelR(r);
               setSelC(c);
               const cell = rows[r]?.cells[c] ?? null;
-              setPreviewPinned(Boolean(cell));
+              setPreviewPinned(
+                cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode),
+              );
             }}
             onHoverCell={(r, c, cell, x, y, anchor) => {
               cancelHoverDismiss();
+              if (!cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode)) {
+                setHover(null);
+                return;
+              }
               setHover({ row: r, col: c, cell, x, y, anchor });
             }}
-            onLeaveGrid={scheduleHoverDismiss}
+            onLeaveGrid={clearHoverNow}
             cardPreviewContainerRef={cardPreviewRef}
             onViewportChange={bumpPinnedAnchor}
             interactionPortRef={heatmapPortRef}
@@ -936,8 +1143,21 @@ export function HeatmapView() {
             <div className="min-w-0 space-y-1.5 text-sm">
               <div className="font-medium leading-tight">{rows[floatingPreview.row]?.name}</div>
               <div className="text-muted-foreground">
-                {columns[floatingPreview.col]?.name} ({columns[floatingPreview.col]?.release_date})
+                {columns[floatingPreview.col]?.set_type === "aggregate"
+                  ? `${columns[floatingPreview.col]?.name} (row aggregate)`
+                  : `${columns[floatingPreview.col]?.name} (${columns[floatingPreview.col]?.release_date})`}
               </div>
+              {floatingPreview.cell.source_set_name ? (
+                <div className="text-xs text-muted-foreground">
+                  Printing: {floatingPreview.cell.source_set_name}{" "}
+                  <span className="font-mono">
+                    ({(floatingPreview.cell.source_set_code ?? "").toUpperCase()})
+                  </span>
+                </div>
+              ) : null}
+              {floatingPreview.cell.aggregate_note ? (
+                <div className="text-[11px] leading-snug text-muted-foreground">{floatingPreview.cell.aggregate_note}</div>
+              ) : null}
               <div className="font-mono text-xs">
                 USD {floatingPreview.cell.usd ?? "—"} · Foil {floatingPreview.cell.usd_foil ?? "—"}
               </div>
@@ -1081,7 +1301,7 @@ export function HeatmapView() {
             <li>Enter: open Scryfall for selected printing</li>
             <li>O: add owned · Shift+O: remove one copy</li>
             <li>W: watchlist · P: pin</li>
-            <li>F: filters · /: search · Esc: close panels</li>
+            <li>F: filter sheet (draft until Apply) · /: search · Esc: close panels</li>
             <li>⌘K / Ctrl+K: command palette</li>
             <li>G then O / W / H: Owned / Watchlist / Home</li>
             <li>
@@ -1089,9 +1309,16 @@ export function HeatmapView() {
               exclGroups (preset column groups); sets = allowlist columns
             </li>
             <li>
+              <span className="font-medium text-foreground">Display toggles (chip bar)</span>:{" "}
+              <em>Empty columns</em> adds every in-scope set as a column even when no row has a card there.{" "}
+              <em>Strict cells</em> draws non-matching printings as blank squares; leave off for dimmed
+              &quot;context&quot; cells. <em>Pinned strip</em> keeps favorited oracle cards in a block at
+              the top (separate from <em>Pinned only</em> in the sheet, which filters the row list).
+            </li>
+            <li>
               sort / sk: price_min | price_median | price_max with asc/desc; optional hcol= set code for
-              temporary column sort; strict=1 hides non-matching printings; emptyCols=1 shows in-scope
-              empty columns; grid keeps the set header row and card name column fixed while you scroll
+              temporary column sort; strict=1 and emptyCols=1 mirror the chip toggles; grid keeps the set
+              header row and card name column fixed while you scroll
             </li>
             <li>
               Click a cell that has a printing to pin the card preview next to that cell (anchored). Esc,

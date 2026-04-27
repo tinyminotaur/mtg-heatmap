@@ -2,8 +2,10 @@
  * §11.11 — Single hydration path: named query params + optional `s=` base64url JSON overlay.
  */
 
+import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
 import {
   type HeatmapFilters,
+  type HeatmapColumnLayout,
   defaultHeatmapFilters,
   parseSortSlotsFromUrl,
   slotsToPrimarySortString,
@@ -26,6 +28,14 @@ export const ROW_SORT_OPTIONS = [
   "price_median",
 ] as const;
 export type RowSortValue = (typeof ROW_SORT_OPTIONS)[number];
+
+export const CELL_PRICE_FIELDS = ["usd", "usd_foil", "eur", "tix"] as const;
+export type CellPriceField = (typeof CELL_PRICE_FIELDS)[number];
+
+export function parseHeatmapCellPriceField(sp: URLSearchParams): CellPriceField {
+  const v = (sp.get("pm") ?? "").trim().toLowerCase();
+  return (CELL_PRICE_FIELDS as readonly string[]).includes(v) ? (v as CellPriceField) : "usd";
+}
 
 const LEGACY_ROW_SORT = [...ROW_SORT_OPTIONS, "price_avg"] as const;
 
@@ -157,13 +167,18 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     valueAggScope: merged.get("vscope") === "all" ? "all" : "visible",
     colSort: normalizedColSort(merged),
     page: Math.max(0, Number(merged.get("page") ?? 0) || 0),
-    pageSize: Math.min(1500, Math.max(1, Number(merged.get("pageSize") ?? 1000) || 1000)),
+    pageSize: Math.min(
+      HEATMAP_MAX_PAGE_SIZE,
+      Math.max(1, Number(merged.get("pageSize") ?? HEATMAP_MAX_PAGE_SIZE) || HEATMAP_MAX_PAGE_SIZE),
+    ),
     showPinned: merged.get("hidePinned") !== "1",
     showEmptyColumns: merged.get("emptyCols") === "1",
     matchMode: merged.get("strict") === "1" ? "strict" : "context",
     groupBy,
     groupCollapsedKeys,
     headerSortSetCode: merged.get("hcol")?.trim().toLowerCase() || null,
+    heatmapColumnLayout: (merged.get("hlay") === "value" ? "value" : "sets") as HeatmapColumnLayout,
+    cellPriceField: parseHeatmapCellPriceField(merged),
   };
 }
 
@@ -201,7 +216,7 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.search.trim()) out.set("q", f.search.trim());
   if (f.colSort !== "release") out.set("colSort", f.colSort);
   if (f.page > 0) out.set("page", String(f.page));
-  if (f.pageSize !== 1000) out.set("pageSize", String(f.pageSize));
+  if (f.pageSize !== HEATMAP_MAX_PAGE_SIZE) out.set("pageSize", String(f.pageSize));
   if (!f.showPinned) out.set("hidePinned", "1");
   if (f.showEmptyColumns) out.set("emptyCols", "1");
   if (f.matchMode === "strict") out.set("strict", "1");
@@ -209,6 +224,8 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.groupBy !== "none") out.set("grp", f.groupBy);
   if (f.groupCollapsedKeys.length) out.set("gc", JSON.stringify(f.groupCollapsedKeys));
   if (f.headerSortSetCode) out.set("hcol", f.headerSortSetCode);
+  if (f.heatmapColumnLayout === "value") out.set("hlay", "value");
+  if (f.cellPriceField !== "usd") out.set("pm", f.cellPriceField);
 
   const skStr = normalizedSortSlots(f)
     .slice(0, 3)

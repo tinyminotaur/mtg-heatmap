@@ -24,7 +24,11 @@ import {
 } from "@/lib/card-row-canvas";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
 import type { PriceMode } from "@/lib/price-scale";
-import { priceToColor } from "@/lib/price-scale";
+import {
+  cellEligibleForHeatmapHoverPreview,
+  formatHeatmapCellPriceLabel,
+  priceToColor,
+} from "@/lib/price-scale";
 
 export type HeatmapCellAnchorRect = {
   left: number;
@@ -35,6 +39,8 @@ export type HeatmapCellAnchorRect = {
 
 export type HeatmapGridHandle = {
   getDataCellClientRect: (row: number, col: number) => HeatmapCellAnchorRect | null;
+  /** Scroll the scroll port so the data cell (row, col) is visible; no-op if already in view. */
+  scrollCellIntoView: (row: number, col: number) => void;
 };
 
 type Props = {
@@ -124,6 +130,42 @@ function drawPriceRangeBadge(
   ctx.restore();
 }
 
+function drawCellPriceLabel(
+  ctx: CanvasRenderingContext2D,
+  vx: number,
+  vy: number,
+  text: string,
+  dark: boolean,
+  emphasis: boolean,
+) {
+  /** Top of cell so we do not collide with Lowest/Highest badges (bottom-right). */
+  const x = vx + 3;
+  const y = vy + 3;
+  const maxW = HEATMAP_COL_WIDTH - 6;
+  ctx.save();
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  let fontPx = 8;
+  for (let i = 0; i < 4; i++) {
+    ctx.font = `bold ${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    if (ctx.measureText(text).width <= maxW || fontPx <= 6) break;
+    fontPx -= 1;
+  }
+  if (emphasis) {
+    ctx.lineWidth = 2.25;
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.strokeStyle = dark ? "rgba(0,0,0,0.62)" : "rgba(255,255,255,0.82)";
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = dark ? "#f9fafb" : "#111827";
+    ctx.fillText(text, x, y);
+  } else {
+    ctx.fillStyle = dark ? "rgba(156,163,175,0.98)" : "rgba(82,82,91,0.98)";
+    ctx.fillText(text, x, y);
+  }
+  ctx.restore();
+}
+
 /** Viewport-sized canvas + off-screen scroll spacer so large grids stay GPU-friendly. */
 export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function HeatmapGrid(
   {
@@ -170,8 +212,38 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         if (row < 0 || col < 0 || row >= rows.length || col >= columns.length) return null;
         return readCellAnchorRect(canvas, scrollEl, row, col);
       },
+      scrollCellIntoView(row: number, col: number) {
+        const scrollEl = scrollRef.current;
+        if (!scrollEl) return;
+        if (row < 0 || col < 0 || row >= rows.length || col >= columns.length) return;
+
+        const pad = 12;
+        const cellLeft = HEATMAP_FROZEN_COL_W + col * HEATMAP_COL_WIDTH;
+        const cellRight = cellLeft + HEATMAP_COL_WIDTH;
+        const cellTop = HEATMAP_HEADER_H + row * HEATMAP_ROW_HEIGHT;
+        const cellBottom = cellTop + HEATMAP_ROW_HEIGHT;
+
+        const cw = scrollEl.clientWidth;
+        const ch = scrollEl.clientHeight;
+        let sl = scrollEl.scrollLeft;
+        let st = scrollEl.scrollTop;
+
+        const viewLeft = sl;
+        const viewTop = st;
+
+        if (cellLeft < viewLeft + pad) sl = cellLeft - pad;
+        if (cellRight > sl + cw - pad) sl = cellRight - cw + pad;
+        if (cellTop < viewTop + pad) st = cellTop - pad;
+        if (cellBottom > st + ch - pad) st = cellBottom - ch + pad;
+
+        const maxSl = Math.max(0, scrollEl.scrollWidth - cw);
+        const maxSt = Math.max(0, scrollEl.scrollHeight - ch);
+        scrollEl.scrollLeft = Math.min(maxSl, Math.max(0, sl));
+        scrollEl.scrollTop = Math.min(maxSt, Math.max(0, st));
+        onViewportChange?.();
+      },
     }),
-    [rows.length, columns.length],
+    [rows.length, columns.length, onViewportChange],
   );
 
   const gridW = columns.length * HEATMAP_COL_WIDTH;
@@ -276,6 +348,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
         }
         if (cell && !strictHide) {
+          const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
+          drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null);
           const badges: { label: string; variant: "low" | "high" }[] = [];
           if (row.price_low_cols.includes(c)) badges.push({ label: "Lowest", variant: "low" });
           if (row.price_high_cols.includes(c)) badges.push({ label: "Highest", variant: "high" });
@@ -321,10 +395,29 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       ctx.fillRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
       ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
       ctx.strokeRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
-      const icon = setImagesRef.current.get(c.code);
       const isz = 30;
-      const ix = vx + (HEATMAP_COL_WIDTH - isz) / 2;
       const iy = 5;
+      if (c.set_type === "aggregate") {
+        ctx.fillStyle = dark ? "#1e293b" : "#e2e8f0";
+        ctx.beginPath();
+        ctx.roundRect(vx + 3, iy, HEATMAP_COL_WIDTH - 6, isz + 10, 6);
+        ctx.fill();
+        ctx.fillStyle = fg;
+        ctx.font = "bold 12px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(c.name, vx + HEATMAP_COL_WIDTH / 2, iy + (isz + 10) / 2 + 2);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = muted;
+        ctx.font = "9px ui-monospace, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Σ row", vx + HEATMAP_COL_WIDTH / 2, HEATMAP_HEADER_H - 6);
+        ctx.textAlign = "left";
+        continue;
+      }
+      const icon = setImagesRef.current.get(c.code);
+      const ix = vx + (HEATMAP_COL_WIDTH - isz) / 2;
       if (icon && icon.complete && icon.naturalWidth > 0) {
         ctx.save();
         ctx.fillStyle = dark ? "rgba(248, 250, 252, 0.96)" : "rgba(255, 255, 255, 0.98)";
@@ -461,6 +554,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   useEffect(() => {
     let cancelled = false;
     for (const col of columns) {
+      if (col.set_type === "aggregate") continue;
       if (setImagesRef.current.has(col.code)) continue;
       const primary = col.icon_svg_path?.trim();
       const fallback = `https://svgs.scryfall.io/sets/${col.code.toLowerCase()}.svg`;
@@ -494,9 +588,15 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     const canvas = canvasRef.current;
     const scrollEl = scrollRef.current;
     if (!canvas || !scrollEl) return;
+    const cell = rows[h.r]?.cells[h.c] ?? null;
+    if (!cellEligibleForHeatmapHoverPreview(cell, matchMode, priceMode)) {
+      lastHoverWithCellRef.current = null;
+      onLeaveGrid();
+      return;
+    }
     const a = readCellAnchorRect(canvas, scrollEl, h.r, h.c);
-    onHoverCell(h.r, h.c, h.cell, a.left + a.width / 2, a.top + a.height / 2, a);
-  }, [onHoverCell]);
+    onHoverCell(h.r, h.c, cell, a.left + a.width / 2, a.top + a.height / 2, a);
+  }, [rows, matchMode, priceMode, onHoverCell, onLeaveGrid]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -568,7 +668,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ) {
       const col = Math.floor((x - HEATMAP_FROZEN_COL_W) / HEATMAP_COL_WIDTH);
       if (col >= 0 && col < columns.length) {
-        onHeaderSetClick(columns[col]!.code);
+        const code = columns[col]!.code;
+        if (!code.startsWith("__")) onHeaderSetClick(code);
         return;
       }
     }
@@ -580,18 +681,22 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const hit = clientToCell(e.clientX, e.clientY);
     if (!hit) {
-      // Frozen name column / header still sit on this canvas; leaving "data" cells must not
-      // dismiss preview — only leaving the grid port (or timer) clears hover.
+      lastHoverWithCellRef.current = null;
+      onLeaveGrid();
       return;
     }
     const canvas = canvasRef.current;
     const scrollEl = scrollRef.current;
     if (!canvas || !scrollEl) return;
     const cell = rows[hit.row]?.cells[hit.col] ?? null;
+    if (!cellEligibleForHeatmapHoverPreview(cell, matchMode, priceMode)) {
+      lastHoverWithCellRef.current = null;
+      onLeaveGrid();
+      return;
+    }
     const anchor = readCellAnchorRect(canvas, scrollEl, hit.row, hit.col);
-    if (cell) lastHoverWithCellRef.current = { r: hit.row, c: hit.col, cell };
-    else lastHoverWithCellRef.current = null;
-    onHoverCell(hit.row, hit.col, cell, e.clientX, e.clientY, anchor);
+    lastHoverWithCellRef.current = { r: hit.row, c: hit.col, cell: cell! };
+    onHoverCell(hit.row, hit.col, cell!, e.clientX, e.clientY, anchor);
   };
 
   const onPortMouseLeave = (e: React.MouseEvent<HTMLElement>) => {

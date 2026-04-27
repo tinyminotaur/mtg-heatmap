@@ -3,6 +3,8 @@ import { getDb } from "@/lib/db";
 import { getHeatmapData, parseFilters } from "@/lib/heatmap-query";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,6 +14,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data);
   } catch (e) {
     console.error(e);
-    return NextResponse.json({ error: "heatmap_failed" }, { status: 500 });
+    const message = e instanceof Error ? e.message : String(e);
+    // Always return `message` so clients can show it; paths are generic (no secrets in this POC).
+    return NextResponse.json({ error: "heatmap_failed", message }, { status: 500 });
   }
 }

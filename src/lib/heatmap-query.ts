@@ -4,7 +4,8 @@
  * 2) Printing / collection predicates (`buildHaving`, rarity / price-in-visible-sets / owned / …)
  * 3) Column resolution (`resolveHeatmapColumns`) — global set list before pagination
  * 4) Price filter applied with visible column codes
- * 5) Row selection + `ORDER BY` (global `setOrder` for value aggregates — see AGENTS.md)
+ * 5) Row selection + `ORDER BY` (global `setOrder` for value aggregates — see AGENTS.md); rows must
+ *    have a printing in at least one visible column set so single-edition views do not list all-empty rows
  * 6) Per-cell `printing_matches` for strict vs context display (§11.2.6)
  */
 
@@ -12,8 +13,9 @@ import type Database from "better-sqlite3";
 import { LOCAL_USER_ID } from "@/lib/constants";
 import type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
 import { defaultHeatmapFilters } from "@/lib/filter-state";
+import { cellPriceForMode, type PriceMode } from "@/lib/price-scale";
 import { resolveHeatmapColumns } from "./heatmap-column-resolve";
-import { parseHeatmapUrlSearchParams } from "@/lib/heatmap-url-params";
+import { parseHeatmapUrlSearchParams, type CellPriceField } from "@/lib/heatmap-url-params";
 import type { ColumnMeta } from "@/lib/heatmap-types";
 
 export type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
@@ -28,8 +30,9 @@ export type CellDTO = {
   tix: number | null;
   rarity: string | null;
   image_small: string | null;
-  image_normal: string | null;
-  image_large: string | null;
+  /** Omitted from `/api/heatmap` JSON to keep payloads small; UI falls back to `image_small`. */
+  image_normal?: string | null;
+  image_large?: string | null;
   scryfall_uri: string | null;
   tcgplayer_url: string | null;
   cardmarket_url: string | null;
@@ -37,6 +40,13 @@ export type CellDTO = {
   watchlisted: boolean;
   /** Printing-level predicates (rarity / visible-set price / per-printing owned & watchlist). */
   printing_matches: boolean;
+  /** Value-column layout: aggregate shown in cell / tier (same units as `cellPriceField` URL param). */
+  display_price?: number | null;
+  /** Set whose printing supplies art / links for this aggregate. */
+  source_set_code?: string | null;
+  source_set_name?: string | null;
+  /** When median spans two printings, short explanation for preview. */
+  aggregate_note?: string | null;
 };
 
 export type RowDTO = {
@@ -60,6 +70,31 @@ export type RowDTO = {
 
 export function parseFilters(sp: URLSearchParams): HeatmapFilters {
   return parseHeatmapUrlSearchParams(sp);
+}
+
+function safeJsonArray(raw: unknown): string[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeJsonRecord(raw: unknown): Record<string, string> {
+  if (typeof raw !== "string" || !raw.trim()) return {};
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof val === "string") out[k] = val;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 /** Normalize older saved state missing new fields. */
@@ -93,10 +128,45 @@ function groupCollapsedClause(f: HeatmapFilters, gexpr: string | null): { sql: s
   return { sql: ` AND (${gexpr}) NOT IN (${ph}) `, params: [...f.groupCollapsedKeys] };
 }
 
+/** Drop cards with no printing in any visible column (e.g. one-edition filter should not list all-empty rows). */
+function requirePrintingInHeatmapColumnsSql(setOrder: string[]): { sql: string; params: unknown[] } {
+  if (!setOrder.length) return { sql: "", params: [] };
+  const ph = setOrder.map(() => "?").join(",");
+  return {
+    sql: ` AND EXISTS (SELECT 1 FROM printings pv WHERE pv.oracle_id = c.oracle_id AND pv.set_code IN (${ph}))`,
+    params: [...setOrder],
+  };
+}
+
 function aggSetInSql(f: HeatmapFilters, setOrder: string[]): { inner: string; params: unknown[] } {
   if (f.valueAggScope === "all" || !setOrder.length) return { inner: "", params: [] };
   const ph = setOrder.map(() => "?").join(",");
   return { inner: ` AND p.set_code IN (${ph}) `, params: [...setOrder] };
+}
+
+/** SQL value + filter aligned with `cellPriceForMode` (no `display_price`). */
+function cellPriceAggregationSql(field: CellPriceField): { vExpr: string } {
+  switch (field) {
+    case "usd_foil":
+      return {
+        vExpr: `CASE WHEN pc.usd_foil IS NOT NULL AND pc.usd_foil > 0 THEN pc.usd_foil
+             WHEN pc.usd IS NOT NULL AND pc.usd > 0 THEN pc.usd
+             ELSE NULL END`,
+      };
+    case "eur":
+      return { vExpr: `pc.eur` };
+    case "tix":
+      return { vExpr: `pc.tix` };
+    default:
+      return { vExpr: `pc.usd` };
+  }
+}
+
+/** Match `printing_matches` rarity gate on per-printing aggregates (sort vs value cells). */
+function rarityFilterForAggSql(f: HeatmapFilters): { sql: string; params: unknown[] } {
+  if (!f.rarity.length) return { sql: "", params: [] };
+  const ph = f.rarity.map(() => "?").join(",");
+  return { sql: ` AND p.rarity IN (${ph}) `, params: [...f.rarity] };
 }
 
 function priceValueSubquery(
@@ -104,25 +174,28 @@ function priceValueSubquery(
   f: HeatmapFilters,
   setOrder: string[],
 ): { expr: string; params: unknown[] } {
-  const { inner, params: inParams } = aggSetInSql(f, setOrder);
-  const baseWhere = `p.oracle_id = c.oracle_id ${inner}
-      AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0`;
+  const { inner, params: setParams } = aggSetInSql(f, setOrder);
+  const { sql: raritySql, params: rarityParams } = rarityFilterForAggSql(f);
+  const { vExpr } = cellPriceAggregationSql(f.cellPriceField ?? "usd");
+  const baseWhere = `p.oracle_id = c.oracle_id ${inner}${raritySql}
+      AND (${vExpr}) IS NOT NULL AND (${vExpr}) > 0`;
+  const inParams = [...setParams, ...rarityParams];
   if (kind === "min") {
     return {
-      expr: `(SELECT MIN(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE ${baseWhere})`,
+      expr: `(SELECT MIN(${vExpr}) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE ${baseWhere})`,
       params: inParams,
     };
   }
   if (kind === "max") {
     return {
-      expr: `(SELECT MAX(COALESCE(pc.usd, pc.usd_foil)) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE ${baseWhere})`,
+      expr: `(SELECT MAX(${vExpr}) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id WHERE ${baseWhere})`,
       params: inParams,
     };
   }
   return {
     expr: `(SELECT AVG(t.v) FROM (
-      SELECT COALESCE(pc.usd, pc.usd_foil) AS v,
-        ROW_NUMBER() OVER (ORDER BY COALESCE(pc.usd, pc.usd_foil)) AS rn,
+      SELECT ${vExpr} AS v,
+        ROW_NUMBER() OVER (ORDER BY ${vExpr} ASC, p.set_code COLLATE NOCASE ASC) AS rn,
         COUNT(*) OVER () AS cnt
       FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
       WHERE ${baseWhere}
@@ -145,12 +218,13 @@ function slotMetric(slot: SortSlot, f: HeatmapFilters, setOrder: string[]): { sq
   }
   if (!setOrder.length) return { sql: ORDER_TIEBREAKER, orderParams: [] };
   const dir = slot.dir ?? (slot.key === "price_min" ? "asc" : "desc");
-  const nullPlacement = "NULLS LAST";
   const kind = slot.key === "price_min" ? "min" : slot.key === "price_median" ? "median" : "max";
   const { expr, params } = priceValueSubquery(kind, f, setOrder);
+  // Portable nulls-last (SQLite <3.30 has no NULLS LAST in ORDER BY).
+  const nullsLastKey = `(CASE WHEN (${expr}) IS NULL THEN 1 ELSE 0 END)`;
   return {
-    sql: `${expr} ${dir.toUpperCase()} ${nullPlacement}`,
-    orderParams: params,
+    sql: `${nullsLastKey}, ${expr} ${dir.toUpperCase()}`,
+    orderParams: [...params, ...params],
   };
 }
 
@@ -164,11 +238,12 @@ function buildRowOrderClause(
   const orderParams: unknown[] = [];
 
   if (fx.headerSortSetCode && setOrder.includes(fx.headerSortSetCode)) {
-    parts.push(
-      `(SELECT COALESCE(pc.usd, pc.usd_foil) FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
-        WHERE p.oracle_id = c.oracle_id AND p.set_code = ? AND COALESCE(pc.usd, pc.usd_foil) IS NOT NULL AND COALESCE(pc.usd, pc.usd_foil) > 0) DESC NULLS LAST`,
-    );
-    orderParams.push(fx.headerSortSetCode);
+    const { vExpr } = cellPriceAggregationSql(fx.cellPriceField ?? "usd");
+    const { sql: raritySql, params: rarityParams } = rarityFilterForAggSql(fx);
+    const headerCol = `(SELECT ${vExpr} FROM printings p INNER JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+        WHERE p.oracle_id = c.oracle_id AND p.set_code = ?${raritySql} AND (${vExpr}) IS NOT NULL AND (${vExpr}) > 0)`;
+    parts.push(`(CASE WHEN ${headerCol} IS NULL THEN 1 ELSE 0 END), ${headerCol} DESC`);
+    orderParams.push(fx.headerSortSetCode, ...rarityParams, fx.headerSortSetCode, ...rarityParams);
   }
 
   if (groupExpr && fx.groupBy !== "none") {
@@ -332,6 +407,156 @@ function printingMatchesCell(
   return true;
 }
 
+type PrintingRow = {
+  oracle_id: string;
+  set_code: string;
+  scryfall_id: string;
+  usd: number | null;
+  usd_foil: number | null;
+  eur: number | null;
+  tix: number | null;
+  rarity: string | null;
+  image_uri_small: string | null;
+  image_uri_normal: string | null;
+  image_uri_large: string | null;
+  scryfall_uri: string | null;
+  tcgplayer_url: string | null;
+  cardmarket_url: string | null;
+};
+
+function valueLayoutColumnMetas(): ColumnMeta[] {
+  return [
+    {
+      code: "__min__",
+      name: "Min",
+      release_date: null,
+      set_type: "aggregate",
+      icon_svg_path: null,
+      year: null,
+    },
+    {
+      code: "__med__",
+      name: "Median",
+      release_date: null,
+      set_type: "aggregate",
+      icon_svg_path: null,
+      year: null,
+    },
+    {
+      code: "__max__",
+      name: "Max",
+      release_date: null,
+      set_type: "aggregate",
+      icon_svg_path: null,
+      year: null,
+    },
+  ];
+}
+
+function printingToCellDto(
+  p: PrintingRow,
+  fx: HeatmapFilters,
+  setCode: string,
+  priceSetsForCells: string[],
+  ownedMap: Map<string, number>,
+  wl: Set<string>,
+  extra: Pick<CellDTO, "display_price" | "source_set_code" | "source_set_name" | "aggregate_note">,
+): CellDTO {
+  const oq = ownedMap.get(p.scryfall_id) ?? 0;
+  const wlisted = wl.has(p.scryfall_id);
+  const pm = printingMatchesCell(fx, setCode, p, priceSetsForCells, oq, wlisted);
+  return {
+    scryfall_id: p.scryfall_id,
+    usd: p.usd,
+    usd_foil: p.usd_foil,
+    eur: p.eur,
+    tix: p.tix,
+    rarity: p.rarity,
+    image_small: p.image_uri_small,
+    image_normal: p.image_uri_normal,
+    image_large: p.image_uri_large,
+    scryfall_uri: p.scryfall_uri,
+    tcgplayer_url: p.tcgplayer_url,
+    cardmarket_url: p.cardmarket_url,
+    owned_qty: oq,
+    watchlisted: wlisted,
+    printing_matches: pm,
+    ...extra,
+  };
+}
+
+function buildValueLayoutCells(
+  pmap: Map<string, PrintingRow>,
+  physicalSetCodes: string[],
+  setDisplayName: (code: string) => string,
+  fx: HeatmapFilters,
+  field: PriceMode,
+  ownedMap: Map<string, number>,
+  wl: Set<string>,
+): (CellDTO | null)[] {
+  type E = { v: number; code: string; p: PrintingRow };
+  const entries: E[] = [];
+  const codesToScan =
+    fx.valueAggScope === "all"
+      ? [...pmap.keys()].sort((a, b) => a.localeCompare(b))
+      : physicalSetCodes;
+  for (const code of codesToScan) {
+    const p = pmap.get(code);
+    if (!p) continue;
+    const v = cellPriceForMode(
+      { usd: p.usd, usd_foil: p.usd_foil, eur: p.eur, tix: p.tix },
+      field,
+    );
+    if (v == null || !(v > 0)) continue;
+    const oq = ownedMap.get(p.scryfall_id) ?? 0;
+    const wlisted = wl.has(p.scryfall_id);
+    if (!printingMatchesCell(fx, code, p, physicalSetCodes, oq, wlisted)) continue;
+    entries.push({ v, code, p });
+  }
+  entries.sort((a, b) => a.v - b.v || a.code.localeCompare(b.code));
+  if (!entries.length) return [null, null, null];
+
+  const minE = entries[0]!;
+  const maxE = entries[entries.length - 1]!;
+  const n = entries.length;
+  let median: number;
+  let medPrimary: E;
+  let aggregateNote: string | null = null;
+  if (n % 2 === 1) {
+    medPrimary = entries[Math.floor(n / 2)]!;
+    median = medPrimary.v;
+  } else {
+    const lo = entries[n / 2 - 1]!;
+    const hi = entries[n / 2]!;
+    median = (lo.v + hi.v) / 2;
+    medPrimary = hi;
+    if (Math.abs(lo.v - hi.v) > 1e-6 || lo.code !== hi.code) {
+      aggregateNote = `Median ${median.toFixed(2)} between ${setDisplayName(lo.code)} (${lo.v}) and ${setDisplayName(hi.code)} (${hi.v})`;
+    }
+  }
+
+  const priceSets = physicalSetCodes;
+  const minCell = printingToCellDto(minE.p, fx, minE.code, priceSets, ownedMap, wl, {
+    display_price: minE.v,
+    source_set_code: minE.code,
+    source_set_name: setDisplayName(minE.code),
+    aggregate_note: null,
+  });
+  const maxCell = printingToCellDto(maxE.p, fx, maxE.code, priceSets, ownedMap, wl, {
+    display_price: maxE.v,
+    source_set_code: maxE.code,
+    source_set_name: setDisplayName(maxE.code),
+    aggregate_note: null,
+  });
+  const medCell = printingToCellDto(medPrimary.p, fx, medPrimary.code, priceSets, ownedMap, wl, {
+    display_price: median,
+    source_set_code: medPrimary.code,
+    source_set_name: setDisplayName(medPrimary.code),
+    aggregate_note: aggregateNote,
+  });
+  return [minCell, medCell, maxCell];
+}
+
 export function getHeatmapData(
   db: Database.Database,
   f: HeatmapFilters,
@@ -344,7 +569,7 @@ export function getHeatmapData(
   const gexpr = groupKeyExpr(fx);
   const gc = groupCollapsedClause(fx, gexpr);
 
-  const heatmapColumns = resolveHeatmapColumns(
+  const physicalColumns = resolveHeatmapColumns(
     db,
     fx,
     cardPred,
@@ -353,20 +578,23 @@ export function getHeatmapData(
     havingNoPrice.params,
     userId,
   );
-  const setOrder = heatmapColumns.map((c) => c.code);
+  const physicalSetCodes = physicalColumns.map((c) => c.code);
+  const valueLayout = fx.heatmapColumnLayout === "value" && physicalSetCodes.length > 0;
+  const heatmapColumns = valueLayout ? valueLayoutColumnMetas() : physicalColumns;
 
   const { sql: havingSql, params: havingParams } = buildHaving(fx, userId, {
-    priceSetCodes: setOrder,
+    priceSetCodes: physicalSetCodes,
   });
 
-  const whereTail = `${havingSql} ${gc.sql}`;
-  const whereParams = [...havingParams, ...gc.params];
+  const visPrint = requirePrintingInHeatmapColumnsSql(physicalSetCodes);
+  const whereTail = `${havingSql} ${gc.sql}${visPrint.sql}`;
+  const whereParams = [...havingParams, ...gc.params, ...visPrint.params];
 
   const countSql = `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${whereTail}`;
   const total = (db.prepare(countSql).get(...cardParams, ...whereParams) as { n: number }).n;
 
   const gSelect = gexpr ? `, (${gexpr}) AS _gk` : ", NULL AS _gk";
-  const { clause: orderClause, orderParams } = buildRowOrderClause(fx, setOrder, gexpr);
+  const { clause: orderClause, orderParams } = buildRowOrderClause(fx, physicalSetCodes, gexpr);
 
   const pinnedRows: Record<string, unknown>[] = fx.showPinned
     ? (db
@@ -408,16 +636,17 @@ export function getHeatmapData(
 
   const inList = oracleIds.map(() => "?").join(",");
 
-  const printSql =
-    setOrder.length > 0
-      ? `
+  const restrictPrintingsToVisibleSets =
+    physicalSetCodes.length > 0 && !(valueLayout && fx.valueAggScope === "all");
+  const printSql = restrictPrintingsToVisibleSets
+    ? `
     SELECT p.*, pc.usd, pc.usd_foil, pc.eur, pc.tix
     FROM printings p
     LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
     WHERE p.oracle_id IN (${inList})
-      AND p.set_code IN (${setOrder.map(() => "?").join(",")})
+      AND p.set_code IN (${physicalSetCodes.map(() => "?").join(",")})
   `
-      : `
+    : `
     SELECT p.*, pc.usd, pc.usd_foil, pc.eur, pc.tix
     FROM printings p
     LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
@@ -425,24 +654,9 @@ export function getHeatmapData(
   `;
   const printingRows = db
     .prepare(printSql)
-    .all(...oracleIds, ...(setOrder.length ? setOrder : [])) as {
-    oracle_id: string;
-    set_code: string;
-    scryfall_id: string;
-    usd: number | null;
-    usd_foil: number | null;
-    eur: number | null;
-    tix: number | null;
-    rarity: string | null;
-    image_uri_small: string | null;
-    image_uri_normal: string | null;
-    image_uri_large: string | null;
-    scryfall_uri: string | null;
-    tcgplayer_url: string | null;
-    cardmarket_url: string | null;
-  }[];
+    .all(...oracleIds, ...(restrictPrintingsToVisibleSets ? physicalSetCodes : [])) as PrintingRow[];
 
-  const byOracle = new Map<string, Map<string, (typeof printingRows)[0]>>();
+  const byOracle = new Map<string, Map<string, PrintingRow>>();
   for (const pr of printingRows) {
     if (!byOracle.has(pr.oracle_id)) byOracle.set(pr.oracle_id, new Map());
     byOracle.get(pr.oracle_id)!.set(pr.set_code, pr);
@@ -478,46 +692,58 @@ export function getHeatmapData(
     ).map((x) => x.oracle_id),
   );
 
-  const priceSetsForCells = setOrder;
+  const priceSetsForCells = physicalSetCodes;
+  const metaBySet = new Map(physicalColumns.map((c) => [c.code, c]));
+  const setDisplayName = (code: string) => metaBySet.get(code)?.name ?? code.toUpperCase();
 
   const rows: RowDTO[] = merged.map((card) => {
     const oid = card.oracle_id as string;
     const pmap = byOracle.get(oid) ?? new Map();
-    const cells: (CellDTO | null)[] = setOrder.map((code) => {
-      const p = pmap.get(code);
-      if (!p) return null;
-      const oq = ownedMap.get(p.scryfall_id) ?? 0;
-      const wlisted = wl.has(p.scryfall_id);
-      const pm = printingMatchesCell(fx, code, p, priceSetsForCells, oq, wlisted);
-      return {
-        scryfall_id: p.scryfall_id,
-        usd: p.usd,
-        usd_foil: p.usd_foil,
-        eur: p.eur,
-        tix: p.tix,
-        rarity: p.rarity,
-        image_small: p.image_uri_small,
-        image_normal: p.image_uri_normal ?? null,
-        image_large: p.image_uri_large ?? null,
-        scryfall_uri: p.scryfall_uri,
-        tcgplayer_url: p.tcgplayer_url,
-        cardmarket_url: p.cardmarket_url,
-        owned_qty: oq,
-        watchlisted: wlisted,
-        printing_matches: pm,
-      };
-    });
+    const cells: (CellDTO | null)[] = valueLayout
+      ? buildValueLayoutCells(
+          pmap,
+          physicalSetCodes,
+          setDisplayName,
+          fx,
+          fx.cellPriceField ?? "usd",
+          ownedMap,
+          wl,
+        )
+      : physicalSetCodes.map((code) => {
+          const p = pmap.get(code);
+          if (!p) return null;
+          const oq = ownedMap.get(p.scryfall_id) ?? 0;
+          const wlisted = wl.has(p.scryfall_id);
+          const pm = printingMatchesCell(fx, code, p, priceSetsForCells, oq, wlisted);
+          return {
+            scryfall_id: p.scryfall_id,
+            usd: p.usd,
+            usd_foil: p.usd_foil,
+            eur: p.eur,
+            tix: p.tix,
+            rarity: p.rarity,
+            image_small: p.image_uri_small,
+            scryfall_uri: p.scryfall_uri,
+            tcgplayer_url: p.tcgplayer_url,
+            cardmarket_url: p.cardmarket_url,
+            owned_qty: oq,
+            watchlisted: wlisted,
+            printing_matches: pm,
+          };
+        });
 
     const priced: { idx: number; v: number }[] = [];
-    cells.forEach((cell, idx) => {
-      if (!cell) return;
-      const v = cell.usd ?? cell.usd_foil;
-      if (v == null || !(v > 0)) return;
-      priced.push({ idx, v });
-    });
+    if (!valueLayout) {
+      cells.forEach((cell, idx) => {
+        if (!cell) return;
+        const v = cell.usd ?? cell.usd_foil;
+        if (v == null || !(v > 0)) return;
+        priced.push({ idx, v });
+      });
+    }
     const price_low_cols: number[] = [];
     const price_high_cols: number[] = [];
-    if (priced.length >= 2) {
+    if (!valueLayout && priced.length >= 2) {
       const minV = Math.min(...priced.map((p) => p.v));
       const maxV = Math.max(...priced.map((p) => p.v));
       if (minV < maxV) {
@@ -552,11 +778,11 @@ export function getHeatmapData(
       oracle_id: oid,
       name: card.name as string,
       mana_cost: (card.mana_cost as string) ?? null,
-      colors: JSON.parse((card.colors as string) || "[]") as string[],
-      color_identity: JSON.parse((card.color_identity as string) || "[]") as string[],
+      colors: safeJsonArray(card.colors),
+      color_identity: safeJsonArray(card.color_identity),
       is_reserved: Boolean(card.is_reserved),
       type_line: (card.type_line as string) ?? null,
-      legalities: JSON.parse((card.legalities as string) || "{}") as Record<string, string>,
+      legalities: safeJsonRecord(card.legalities),
       cells,
       owned_qty,
       watchlisted,

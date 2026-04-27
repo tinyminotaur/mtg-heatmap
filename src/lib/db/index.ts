@@ -6,10 +6,13 @@ import { INIT_SQL } from "@/lib/db/schema";
 
 let dbInstance: Database.Database | null = null;
 
-/** Older DBs created before `image_uri_large` need this column for high-res art in the UI. */
+/** Older DBs may lack image columns added after first POC schema. */
 function migratePrintingsImageColumns(db: Database.Database) {
   const cols = db.prepare(`PRAGMA table_info(printings)`).all() as { name: string }[];
   const names = new Set(cols.map((c) => c.name));
+  if (!names.has("image_uri_normal")) {
+    db.exec("ALTER TABLE printings ADD COLUMN image_uri_normal TEXT");
+  }
   if (!names.has("image_uri_large")) {
     db.exec("ALTER TABLE printings ADD COLUMN image_uri_large TEXT");
   }

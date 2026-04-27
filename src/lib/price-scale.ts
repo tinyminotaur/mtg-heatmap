@@ -37,6 +37,53 @@ function pickPrice(
   }
 }
 
+/** Active numeric price for the cell in the given mode (same basis as `priceToColor`). */
+export function cellPriceForMode(
+  cell: { usd: number | null; usd_foil: number | null; eur: number | null; tix: number | null; display_price?: number | null },
+  mode: PriceMode,
+): number | null {
+  if (cell.display_price != null && !Number.isNaN(cell.display_price) && cell.display_price > 0) {
+    return cell.display_price;
+  }
+  const p = pickPrice(cell, mode);
+  if (p == null || Number.isNaN(p) || p <= 0) return null;
+  return p;
+}
+
+/** Hover / pinned card preview: only cells that show a price band (tier > 0) for the mode; strict hides non-matching printings. */
+export function cellEligibleForHeatmapHoverPreview(
+  cell: {
+    usd: number | null;
+    usd_foil: number | null;
+    eur: number | null;
+    tix: number | null;
+    printing_matches: boolean;
+    display_price?: number | null;
+  } | null,
+  matchMode: "context" | "strict",
+  priceMode: PriceMode,
+): boolean {
+  if (!cell) return false;
+  if (matchMode === "strict" && cell.printing_matches === false) return false;
+  return cellPriceForMode(cell, priceMode) != null;
+}
+
+/** Short label for drawing on heatmap cells; `null` when there is no positive price for that mode. */
+export function formatHeatmapCellPriceLabel(
+  cell: { usd: number | null; usd_foil: number | null; eur: number | null; tix: number | null; display_price?: number | null },
+  mode: PriceMode,
+): string | null {
+  const p = cellPriceForMode(cell, mode);
+  if (p == null) return null;
+  const body = new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: mode === "tix" ? 1 : 2,
+    minimumFractionDigits: 0,
+  }).format(p);
+  if (mode === "eur") return `€${body}`;
+  if (mode === "tix") return body;
+  return `$${body}`;
+}
+
 /** Map USD (or selected field) to tier 0–6 for legend / fill */
 export function priceToTier(price: number | null | undefined): number {
   if (price == null || Number.isNaN(price)) return 0;
@@ -63,7 +110,7 @@ export function priceToColor(
   mode: PriceMode,
   dark: boolean,
 ): string {
-  const p = pickPrice(cell, mode);
-  if (p == null || p <= 0) return tierToColor(0, dark);
+  const p = cellPriceForMode(cell, mode);
+  if (p == null) return tierToColor(0, dark);
   return tierToColor(priceToTier(p), dark);
 }

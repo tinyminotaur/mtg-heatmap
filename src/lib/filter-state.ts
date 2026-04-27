@@ -3,6 +3,8 @@
  * HeatmapFilters stays the API contract; FilterState is the structured UI / saved-view shape.
  */
 
+import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
+
 /** Up to three row-sort keys; value sorts use dir asc | desc. */
 export type SortSlot = {
   key: "name" | "printings" | "reserved" | "price_min" | "price_max" | "price_median";
@@ -10,6 +12,9 @@ export type SortSlot = {
 };
 
 export type ValueAggregationScope = "visible" | "all";
+
+/** Sets = one column per edition; value = Min / Median / Max across qualifying printings. */
+export type HeatmapColumnLayout = "sets" | "value";
 
 export type MatchDisplayMode = "context" | "strict";
 
@@ -55,6 +60,13 @@ export type HeatmapFilters = {
   groupCollapsedKeys: string[];
   /** §11.5.6 — temporary single-column USD sort override. */
   headerSortSetCode: string | null;
+  /** Columns: per-set vs aggregate Min / Median / Max (still uses same visible-set scope for SQL). */
+  heatmapColumnLayout: HeatmapColumnLayout;
+  /**
+   * Field used for value-column aggregates and which printing wins min/med/max (URL `pm=`).
+   * Set-column cell tint still uses client-side Price dropdown only; for value layout this drives API.
+   */
+  cellPriceField: "usd" | "usd_foil" | "eur" | "tix";
 };
 
 export type FilterState = {
@@ -86,6 +98,8 @@ export type FilterState = {
     colSort: string;
     page: number;
     pageSize: number;
+    heatmapColumnLayout: HeatmapColumnLayout;
+    cellPriceField: "usd" | "usd_foil" | "eur" | "tix";
   };
   sort: {
     slots: SortSlot[];
@@ -123,13 +137,15 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   valueAggScope: "visible",
   colSort: "release",
   page: 0,
-  pageSize: 1000,
+  pageSize: HEATMAP_MAX_PAGE_SIZE,
   showPinned: true,
   showEmptyColumns: false,
   matchMode: "context",
   groupBy: "none",
   groupCollapsedKeys: [],
   headerSortSetCode: null,
+  heatmapColumnLayout: "sets",
+  cellPriceField: "usd",
 };
 
 export const DEFAULT_FILTER_STATE: FilterState = {
@@ -160,7 +176,9 @@ export const DEFAULT_FILTER_STATE: FilterState = {
     showPinnedStrip: true,
     colSort: "release",
     page: 0,
-    pageSize: 1000,
+    pageSize: HEATMAP_MAX_PAGE_SIZE,
+    heatmapColumnLayout: "sets",
+    cellPriceField: "usd",
   },
   sort: {
     slots: [{ key: "name", dir: null }],
@@ -259,6 +277,8 @@ export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
     groupBy: fs.group.by,
     groupCollapsedKeys: [...fs.group.collapsedKeys],
     headerSortSetCode: fs.sort.headerPriceSetCode,
+    heatmapColumnLayout: fs.display.heatmapColumnLayout,
+    cellPriceField: fs.display.cellPriceField,
   };
 }
 
@@ -296,6 +316,8 @@ export function heatmapFiltersToFilterState(f: HeatmapFilters): FilterState {
       colSort: f.colSort,
       page: f.page,
       pageSize: f.pageSize,
+      heatmapColumnLayout: f.heatmapColumnLayout,
+      cellPriceField: f.cellPriceField,
     },
     sort: {
       slots,

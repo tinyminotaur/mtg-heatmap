@@ -19,4 +19,5 @@ export const HEATMAP_IDENTITY_STRIP_W = 22;
 export const HEATMAP_FROZEN_COL_W = 308;
 /** Fits set symbol + readable set code + year. */
 export const HEATMAP_HEADER_H = 76;
-export const HEATMAP_PAGE_SIZE = 1000;
+/** Default and maximum rows per heatmap API page (large JSON payloads can fail on some hosts). */
+export const HEATMAP_MAX_PAGE_SIZE = 1000;

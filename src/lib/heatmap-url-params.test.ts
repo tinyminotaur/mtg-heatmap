@@ -72,4 +72,18 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     const f2 = parseHeatmapUrlSearchParams(sp);
     expect(f2.groupCollapsedKeys).toEqual(["Core"]);
   });
+
+  it("round-trips value column layout and cell price field", () => {
+    const f = {
+      ...defaultHeatmapFilters,
+      heatmapColumnLayout: "value" as const,
+      cellPriceField: "eur" as const,
+    };
+    const sp = serializeHeatmapUrlParams(f);
+    expect(sp.get("hlay")).toBe("value");
+    expect(sp.get("pm")).toBe("eur");
+    const f2 = parseHeatmapUrlSearchParams(sp);
+    expect(f2.heatmapColumnLayout).toBe("value");
+    expect(f2.cellPriceField).toBe("eur");
+  });
 });
