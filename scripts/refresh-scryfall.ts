@@ -13,7 +13,7 @@ import type Database from "better-sqlite3";
 import { getDbFilePath, openDbAt } from "../src/lib/db";
 import { LOCAL_USER_ID, POC_RELEASE_CUTOFF } from "../src/lib/constants";
 
-/** Fetch `User-Agent` must be ByteString (no Unicode like em-dashes). */
+/** Strip to printable ASCII for HTTP headers (undici requires ByteString / Latin-1). */
 function asciiUserAgent(raw: string, maxLen = 256): string {
   const t = [...raw]
     .map((ch) => {
@@ -24,10 +24,28 @@ function asciiUserAgent(raw: string, maxLen = 256): string {
     .replace(/-+/g, "-")
     .trim()
     .slice(0, maxLen);
-  return t || "mtg-heatmap/1.0 (+https://github.com/tinyminotaur/mtg-heatmap)";
+  return t || "mtg-heatmap/1.0 (+https://api.scryfall.com)";
 }
 
-const UA = asciiUserAgent((process.env.SCRYFALL_USER_AGENT ?? "").trim());
+/**
+ * Single source of truth for Scryfall requests. Never pass through unvalidated env
+ * (CI secrets / YAML can contain Unicode punctuation that breaks fetch()).
+ */
+function scryfallUserAgent(): string {
+  const raw = (process.env.SCRYFALL_USER_AGENT ?? "").trim();
+  const ua = raw ? asciiUserAgent(raw) : asciiUserAgent("");
+  for (let i = 0; i < ua.length; i++) {
+    const c = ua.charCodeAt(i);
+    if (c > 127) {
+      throw new Error(
+        `SCRYFALL_USER_AGENT must be ASCII-only (got non-ASCII at index ${i}, U+${c.toString(16)}).`,
+      );
+    }
+  }
+  return ua;
+}
+
+const UA = scryfallUserAgent();
 
 const dbPath = getDbFilePath();
 

@@ -21,13 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "pnpm"
@@ -35,10 +35,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Confirm CI checked out current refresh script
+        run: |
+          grep -q "function scryfallUserAgent" scripts/refresh-scryfall.ts || {
+            echo "scripts/refresh-scryfall.ts missing scryfallUserAgent() - wrong ref or stale checkout."
+            exit 1
+          }
+
       - name: Bulk refresh (Scryfall default_cards)
         env:
-          # Always ASCII for fetch() headers; when secret is unset, avoid legacy Unicode defaults.
-          SCRYFALL_USER_AGENT: ${{ secrets.SCRYFALL_USER_AGENT != '' && secrets.SCRYFALL_USER_AGENT || format('mtg-heatmap/1.0 (+https://github.com/{0})', github.repository) }}
+          SCRYFALL_USER_AGENT: ${{ secrets.SCRYFALL_USER_AGENT }}
         run: pnpm db:refresh
 
       - name: Publish mtg.db to release db-nightly
@@ -59,5 +65,5 @@ jobs:
           if [ -n "$VERCEL_DEPLOY_HOOK_URL" ]; then
             curl -fsS -X POST "$VERCEL_DEPLOY_HOOK_URL"
           else
-            echo "No VERCEL_DEPLOY_HOOK_URL — set repo secret to auto-redeploy after DB publish."
+            echo "No VERCEL_DEPLOY_HOOK_URL - set repo secret to auto-redeploy after DB publish."
           fi
