@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -17,8 +17,16 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
 import type { PriceMode } from "@/lib/price-scale";
+import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
 import { HeatmapGrid } from "./HeatmapGrid";
 import { Legend } from "./Legend";
 
@@ -29,6 +37,8 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 type HeatmapResponse = { columns: ColumnMeta[]; rows: RowDTO[]; total: number };
+
+const RARITIES = ["common", "uncommon", "rare", "mythic", "special", "bonus"] as const;
 
 export function HeatmapView() {
   const router = useRouter();
@@ -55,9 +65,16 @@ export function HeatmapView() {
   } | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const goPending = useRef(false);
+  const goTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const rows = useMemo(() => (data?.rows ?? []) as RowDTO[], [data?.rows]);
   const columns = useMemo(() => data?.columns ?? [], [data?.columns]);
+  const total = data?.total ?? 0;
+  const page = Math.max(0, Number(sp.get("page") ?? 0) || 0);
+  const pageSize = Math.min(1500, Math.max(1, Number(sp.get("pageSize") ?? 1000) || 1000));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const setParam = useCallback(
     (key: string, value: string | null) => {
@@ -69,8 +86,23 @@ export function HeatmapView() {
     [router, sp],
   );
 
+  const setPage = useCallback(
+    (next: number) => {
+      const p = new URLSearchParams(sp.toString());
+      if (next <= 0) p.delete("page");
+      else p.set("page", String(next));
+      router.replace(`/?${p.toString()}`);
+    },
+    [router, sp],
+  );
+
+  const maxR = Math.max(0, rows.length - 1);
+  const maxC = Math.max(0, columns.length - 1);
+  const rowIndex = rows.length ? Math.min(Math.max(0, selR), maxR) : 0;
+  const colIndex = columns.length ? Math.min(Math.max(0, selC), maxC) : 0;
+
   const toggleOwned = useCallback(async () => {
-    const cell = rows[selR]?.cells[selC];
+    const cell = rows[rowIndex]?.cells[colIndex];
     if (!cell) return;
     await fetch("/api/owned/toggle", {
       method: "POST",
@@ -79,10 +111,10 @@ export function HeatmapView() {
     });
     await qc.invalidateQueries({ queryKey: ["heatmap"] });
     await qc.invalidateQueries({ queryKey: ["portfolio"] });
-  }, [qc, rows, selC, selR]);
+  }, [qc, rows, colIndex, rowIndex]);
 
   const decOwned = useCallback(async () => {
-    const cell = rows[selR]?.cells[selC];
+    const cell = rows[rowIndex]?.cells[colIndex];
     if (!cell) return;
     await fetch("/api/owned/toggle", {
       method: "POST",
@@ -91,10 +123,10 @@ export function HeatmapView() {
     });
     await qc.invalidateQueries({ queryKey: ["heatmap"] });
     await qc.invalidateQueries({ queryKey: ["portfolio"] });
-  }, [qc, rows, selC, selR]);
+  }, [qc, rows, colIndex, rowIndex]);
 
   const toggleWatch = useCallback(async () => {
-    const cell = rows[selR]?.cells[selC];
+    const cell = rows[rowIndex]?.cells[colIndex];
     if (!cell) return;
     await fetch("/api/watchlist/toggle", {
       method: "POST",
@@ -102,10 +134,10 @@ export function HeatmapView() {
       body: JSON.stringify({ scryfall_id: cell.scryfall_id }),
     });
     await qc.invalidateQueries({ queryKey: ["heatmap"] });
-  }, [qc, rows, selC, selR]);
+  }, [qc, rows, colIndex, rowIndex]);
 
   const togglePin = useCallback(async () => {
-    const row = rows[selR];
+    const row = rows[rowIndex];
     if (!row) return;
     await fetch("/api/pinned/toggle", {
       method: "POST",
@@ -113,12 +145,85 @@ export function HeatmapView() {
       body: JSON.stringify({ oracle_id: row.oracle_id }),
     });
     await qc.invalidateQueries({ queryKey: ["heatmap"] });
-  }, [qc, rows, selR]);
+  }, [qc, rows, rowIndex]);
+
+  const openScryfallSelection = useCallback(() => {
+    const cell = rows[rowIndex]?.cells[colIndex];
+    const uri = cell?.scryfall_uri;
+    if (uri) window.open(uri, "_blank", "noopener,noreferrer");
+  }, [rows, colIndex, rowIndex]);
+
+  const raritySet = useMemo(() => new Set(sp.get("rarity")?.split(",").filter(Boolean) ?? []), [sp]);
+
+  const toggleRarity = useCallback(
+    (r: string) => {
+      const next = new Set(raritySet);
+      if (next.has(r)) next.delete(r);
+      else next.add(r);
+      const v = [...next].join(",");
+      setParam("rarity", v || null);
+    },
+    [raritySet, setParam],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA") return;
+      const inField = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable;
+
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCmdOpen(true);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        setCmdOpen(false);
+        setHelpOpen(false);
+        setFiltersOpen(false);
+        setHover(null);
+        return;
+      }
+
+      if (inField) return;
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        openScryfallSelection();
+        return;
+      }
+
+      if ((e.key === "g" || e.key === "G") && !e.metaKey && !e.ctrlKey) {
+        goPending.current = true;
+        if (goTimer.current) clearTimeout(goTimer.current);
+        goTimer.current = setTimeout(() => {
+          goPending.current = false;
+        }, 900);
+        return;
+      }
+
+      if (
+        goPending.current &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === "o" ||
+          e.key === "O" ||
+          e.key === "w" ||
+          e.key === "W" ||
+          e.key === "h" ||
+          e.key === "H")
+      ) {
+        e.preventDefault();
+        goPending.current = false;
+        const k = e.key.toLowerCase();
+        if (k === "o") router.push("/owned");
+        else if (k === "w") router.push("/watchlist");
+        else router.push("/");
+        return;
+      }
+
       if (e.key === "o" || e.key === "O") {
         e.preventDefault();
         if (e.shiftKey) void decOwned();
@@ -162,11 +267,31 @@ export function HeatmapView() {
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [columns.length, decOwned, rows.length, toggleOwned, togglePin, toggleWatch]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (goTimer.current) clearTimeout(goTimer.current);
+    };
+  }, [
+    columns.length,
+    decOwned,
+    openScryfallSelection,
+    router,
+    rows.length,
+    toggleOwned,
+    togglePin,
+    toggleWatch,
+  ]);
 
   return (
     <div className="flex flex-1 flex-col gap-3 p-4">
+      <HeatmapCommandPalette
+        open={cmdOpen}
+        onOpenChange={setCmdOpen}
+        onOpenFilters={() => setFiltersOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
+        onApplySearch={(q) => setParam("q", q)}
+      />
+
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">MTG Heatmap</h1>
@@ -181,6 +306,13 @@ export function HeatmapView() {
           <Link href="/watchlist" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             Watchlist
           </Link>
+          <button
+            type="button"
+            className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-muted-foreground")}
+            onClick={() => setCmdOpen(true)}
+          >
+            ⌘K
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
@@ -203,15 +335,84 @@ export function HeatmapView() {
               <SheetHeader>
                 <SheetTitle>Filters</SheetTitle>
               </SheetHeader>
-              <div className="mt-4 space-y-4 text-sm">
+              <div className="mt-4 space-y-5 text-sm">
                 <div className="space-y-2">
-                  <Label>Search</Label>
+                  <Label htmlFor="heatmap-search">Search</Label>
                   <Input
                     id="heatmap-search"
                     defaultValue={sp.get("q") ?? ""}
                     onChange={(e) => setParam("q", e.target.value || null)}
                     placeholder="Card name contains…"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Sort</Label>
+                  <Select value={sp.get("sort") ?? "name"} onValueChange={(v) => setParam("sort", v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="name">Name</SelectItem>
+                      <SelectItem value="printings">Print count</SelectItem>
+                      <SelectItem value="reserved">Reserved first</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="yMin">Year min</Label>
+                    <Input
+                      id="yMin"
+                      type="number"
+                      defaultValue={sp.get("yearMin") ?? ""}
+                      onBlur={(e) => setParam("yearMin", e.target.value.trim() || null)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="yMax">Year max</Label>
+                    <Input
+                      id="yMax"
+                      type="number"
+                      defaultValue={sp.get("yearMax") ?? ""}
+                      onBlur={(e) => setParam("yearMax", e.target.value.trim() || null)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="pMin">Price min (USD)</Label>
+                    <Input
+                      id="pMin"
+                      type="number"
+                      step="0.01"
+                      defaultValue={sp.get("priceMin") ?? ""}
+                      onBlur={(e) => setParam("priceMin", e.target.value.trim() || null)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="pMax">Price max (USD)</Label>
+                    <Input
+                      id="pMax"
+                      type="number"
+                      step="0.01"
+                      defaultValue={sp.get("priceMax") ?? ""}
+                      onBlur={(e) => setParam("priceMax", e.target.value.trim() || null)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Rarity</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {RARITIES.map((r) => (
+                      <label key={r} className="flex items-center gap-1.5 capitalize">
+                        <Checkbox
+                          checked={raritySet.has(r)}
+                          onCheckedChange={() => toggleRarity(r)}
+                        />
+                        {r}
+                      </label>
+                    ))}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -237,8 +438,32 @@ export function HeatmapView() {
                   />
                   <Label htmlFor="owned">Owned only</Label>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="wl"
+                    checked={sp.get("watchlist") === "1"}
+                    onCheckedChange={(v) => setParam("watchlist", v ? "1" : null)}
+                  />
+                  <Label htmlFor="wl">Watchlist only</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="pin"
+                    checked={sp.get("pinned") === "1"}
+                    onCheckedChange={(v) => setParam("pinned", v ? "1" : null)}
+                  />
+                  <Label htmlFor="pin">Pinned only</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="hidePin"
+                    checked={sp.get("hidePinned") === "1"}
+                    onCheckedChange={(v) => setParam("hidePinned", v ? "1" : null)}
+                  />
+                  <Label htmlFor="hidePin">Hide pinned strip</Label>
+                </div>
                 <div className="space-y-2">
-                  <Label>Special group</Label>
+                  <Label>Special group slug</Label>
                   <Input
                     defaultValue={sp.get("group") ?? ""}
                     onBlur={(e) => setParam("group", e.target.value.trim() || null)}
@@ -253,6 +478,36 @@ export function HeatmapView() {
 
       <Legend dark={dark} />
 
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+        <span>
+          {total.toLocaleString()} cards match · showing {rows.length.toLocaleString()} on this page
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), page <= 0 && "pointer-events-none opacity-40")}
+            disabled={page <= 0}
+            onClick={() => setPage(page - 1)}
+          >
+            Previous
+          </button>
+          <span className="font-mono text-xs">
+            {page + 1} / {totalPages}
+          </span>
+          <button
+            type="button"
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              page + 1 >= totalPages && "pointer-events-none opacity-40",
+            )}
+            disabled={page + 1 >= totalPages}
+            onClick={() => setPage(page + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+
       {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
       {error ? <p className="text-sm text-destructive">Failed to load heatmap.</p> : null}
 
@@ -262,8 +517,8 @@ export function HeatmapView() {
           rows={rows}
           priceMode={priceMode}
           dark={dark}
-          selectedRow={selR}
-          selectedCol={selC}
+          selectedRow={rowIndex}
+          selectedCol={colIndex}
           onSelectCell={(r, c) => {
             setSelR(r);
             setSelC(c);
@@ -341,9 +596,12 @@ export function HeatmapView() {
           </SheetHeader>
           <ul className="mt-4 list-inside list-disc space-y-1 text-sm text-muted-foreground">
             <li>Arrows: move selection</li>
-            <li>O: add owned copy · Shift+O: remove one</li>
+            <li>Enter: open Scryfall for selected printing</li>
+            <li>O: add owned · Shift+O: remove one copy</li>
             <li>W: watchlist · P: pin</li>
-            <li>F: filters · /: search</li>
+            <li>F: filters · /: search · Esc: close panels</li>
+            <li>⌘K / Ctrl+K: command palette</li>
+            <li>G then O / W / H: Owned / Watchlist / Home</li>
           </ul>
         </SheetContent>
       </Sheet>

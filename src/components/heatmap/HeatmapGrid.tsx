@@ -23,6 +23,7 @@ type Props = {
   onLeaveGrid: () => void;
 };
 
+/** Viewport-sized canvas + off-screen scroll spacer so large grids stay GPU-friendly. */
 export function HeatmapGrid({
   columns,
   rows,
@@ -46,19 +47,28 @@ export function HeatmapGrid({
     const canvas = canvasRef.current;
     const scrollEl = scrollRef.current;
     if (!canvas || !scrollEl) return;
+
+    const vw = Math.max(1, scrollEl.clientWidth);
+    const vh = Math.max(1, scrollEl.clientHeight);
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(totalW * dpr);
-    canvas.height = Math.floor(totalH * dpr);
-    canvas.style.width = `${totalW}px`;
-    canvas.style.height = `${totalH}px`;
+    canvas.width = Math.floor(vw * dpr);
+    canvas.height = Math.floor(vh * dpr);
+    canvas.style.width = `${vw}px`;
+    canvas.style.height = `${vh}px`;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    const sl = scrollEl.scrollLeft;
+    const st = scrollEl.scrollTop;
+
     const bg = dark ? "#0a0a0a" : "#fafafa";
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, totalW, totalH);
+    ctx.fillRect(0, 0, vw, vh);
+
+    ctx.save();
+    ctx.translate(-sl, -st);
 
     const fg = dark ? "#e5e7eb" : "#111827";
     const muted = dark ? "#9ca3af" : "#6b7280";
@@ -71,22 +81,6 @@ export function HeatmapGrid({
     ctx.font = "11px system-ui";
     ctx.fillText("Card", 8, HEATMAP_HEADER_H / 2 + 4);
 
-    columns.forEach((c, j) => {
-      const x = HEATMAP_FROZEN_COL_W + j * HEATMAP_COL_WIDTH;
-      ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
-      ctx.strokeRect(x, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
-      ctx.fillStyle = fg;
-      ctx.font = "bold 9px ui-monospace, SFMono-Regular, Menlo, monospace";
-      ctx.fillText(c.code, x + 3, 14);
-      ctx.fillStyle = muted;
-      ctx.font = "9px ui-monospace";
-      ctx.fillText(c.year != null ? String(c.year) : "—", x + 3, HEATMAP_HEADER_H - 6);
-    });
-
-    const sl = scrollEl.scrollLeft;
-    const st = scrollEl.scrollTop;
-    const vw = scrollEl.clientWidth;
-    const vh = scrollEl.clientHeight;
     const firstCol = Math.max(0, Math.floor((sl - HEATMAP_FROZEN_COL_W) / HEATMAP_COL_WIDTH));
     const lastCol = Math.min(
       columns.length - 1,
@@ -97,6 +91,19 @@ export function HeatmapGrid({
       rows.length - 1,
       Math.ceil((st + vh - HEATMAP_HEADER_H) / HEATMAP_ROW_HEIGHT) + 1,
     );
+
+    columns.forEach((c, j) => {
+      const x = HEATMAP_FROZEN_COL_W + j * HEATMAP_COL_WIDTH;
+      if (x + HEATMAP_COL_WIDTH < sl || x > sl + vw) return;
+      ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
+      ctx.strokeRect(x, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
+      ctx.fillStyle = fg;
+      ctx.font = "bold 9px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillText(c.code, x + 3, 14);
+      ctx.fillStyle = muted;
+      ctx.font = "9px ui-monospace";
+      ctx.fillText(c.year != null ? String(c.year) : "—", x + 3, HEATMAP_HEADER_H - 6);
+    });
 
     for (let r = firstRow; r <= lastRow; r++) {
       const row = rows[r];
@@ -173,6 +180,8 @@ export function HeatmapGrid({
       ctx.lineWidth = 2;
       ctx.strokeRect(x + 1, y + 1, HEATMAP_COL_WIDTH - 2, HEATMAP_ROW_HEIGHT - 2);
     }
+
+    ctx.restore();
   }, [columns, dark, gridH, priceMode, rows, selectedCol, selectedRow, totalH, totalW]);
 
   useEffect(() => {
@@ -192,13 +201,21 @@ export function HeatmapGrid({
     };
   }, [draw]);
 
+  const onWheelCanvas = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop += e.deltaY;
+    el.scrollLeft += e.deltaX;
+    e.preventDefault();
+  };
+
   const clientToCell = (clientX: number, clientY: number) => {
     const scrollEl = scrollRef.current;
     const canvas = canvasRef.current;
     if (!scrollEl || !canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    const x = clientX - rect.left + scrollEl.scrollLeft;
+    const y = clientY - rect.top + scrollEl.scrollTop;
     if (x < HEATMAP_FROZEN_COL_W || y < HEATMAP_HEADER_H) return null;
     const col = Math.floor((x - HEATMAP_FROZEN_COL_W) / HEATMAP_COL_WIDTH);
     const row = Math.floor((y - HEATMAP_HEADER_H) / HEATMAP_ROW_HEIGHT);
@@ -206,13 +223,13 @@ export function HeatmapGrid({
     return { row, col };
   };
 
-  const onClick = (e: React.MouseEvent) => {
+  const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const hit = clientToCell(e.clientX, e.clientY);
     if (!hit) return;
     onSelectCell(hit.row, hit.col);
   };
 
-  const onMove = (e: React.MouseEvent) => {
+  const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const hit = clientToCell(e.clientX, e.clientY);
     if (!hit) {
       onLeaveGrid();
@@ -226,10 +243,17 @@ export function HeatmapGrid({
     <div className="relative flex min-h-[420px] flex-1 flex-col rounded-md border border-border">
       <div
         ref={scrollRef}
-        className="relative max-h-[calc(100vh-12rem)] flex-1 overflow-auto overscroll-contain"
+        className="relative max-h-[calc(100vh-12rem)] min-h-[320px] flex-1 overflow-auto overscroll-contain"
         onMouseLeave={onLeaveGrid}
       >
-        <canvas ref={canvasRef} className="block cursor-crosshair" onClick={onClick} onMouseMove={onMove} />
+        <div className="pointer-events-none" style={{ width: totalW, height: totalH }} aria-hidden />
+        <canvas
+          ref={canvasRef}
+          className="pointer-events-auto absolute inset-0 z-10 block h-full w-full cursor-crosshair"
+          onClick={onClick}
+          onMouseMove={onMove}
+          onWheel={onWheelCanvas}
+        />
       </div>
     </div>
   );
