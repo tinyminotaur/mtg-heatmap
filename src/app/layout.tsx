@@ -18,8 +18,18 @@ const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
 });
 
+/** Empty string env bypasses `??` and breaks `new URL("")` → 500 on every page. */
+function safeMetadataBase(): URL {
+  const raw = (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").trim();
+  try {
+    return new URL(raw);
+  } catch {
+    return new URL("http://localhost:3000");
+  }
+}
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
+  metadataBase: safeMetadataBase(),
   title: {
     default: "MTG Heatmap",
     template: "%s · MTG Heatmap",
