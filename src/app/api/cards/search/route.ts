@@ -1,15 +1,27 @@
+import fs from "node:fs";
 import { NextRequest, NextResponse } from "next/server";
 import MiniSearch from "minisearch";
-import { getDb } from "@/lib/db";
+import { getDb, getDbFilePath } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 type Doc = { oracle_id: string; name: string };
 
-const g = globalThis as unknown as { __cardMiniSearch?: MiniSearch };
+const g = globalThis as unknown as {
+  __cardMiniSearch?: MiniSearch;
+  __cardMiniMtimeMs?: number;
+};
 
 function getIndex(): MiniSearch {
-  if (g.__cardMiniSearch) return g.__cardMiniSearch;
+  const dbPath = getDbFilePath();
+  let mtime = 0;
+  try {
+    mtime = fs.statSync(dbPath).mtimeMs;
+  } catch {
+    mtime = Date.now();
+  }
+  if (g.__cardMiniSearch && g.__cardMiniMtimeMs === mtime) return g.__cardMiniSearch;
+
   const db = getDb();
   const rows = db.prepare(`SELECT oracle_id, name FROM cards`).all() as Doc[];
   const mini = new MiniSearch({
@@ -19,6 +31,7 @@ function getIndex(): MiniSearch {
   });
   mini.addAll(rows);
   g.__cardMiniSearch = mini;
+  g.__cardMiniMtimeMs = mtime;
   return mini;
 }
 

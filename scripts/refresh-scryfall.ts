@@ -19,6 +19,14 @@ const UA =
 
 const dbPath = path.join(process.cwd(), process.env.DATABASE_URL?.replace(/^\.\//, "") || "data/mtg.db");
 
+type SetNested = {
+  code: string;
+  name: string;
+  released_at?: string | null;
+  set_type?: string | null;
+  digital?: boolean;
+};
+
 type ScryfallCard = {
   object: string;
   id: string;
@@ -34,28 +42,53 @@ type ScryfallCard = {
   legalities?: Record<string, string>;
   digital?: boolean;
   released_at?: string | null;
-  set?: {
-    code: string;
-    name: string;
-    released_at?: string | null;
-    set_type?: string;
-    icon_svg_uri?: string | null;
-    digital?: boolean;
-  };
+  /** Bulk default_cards uses a string set code; single-card API uses a nested object. */
+  set?: string | SetNested;
+  set_name?: string;
+  set_type?: string;
   collector_number?: string;
   rarity?: string;
   image_uris?: { small?: string; normal?: string };
   scryfall_uri?: string;
   purchase_uris?: { tcgplayer?: string; cardmarket?: string };
-  prices?: { usd?: number | null; usd_foil?: number | null; eur?: number | null; tix?: number | null };
+  prices?: {
+    usd?: string | number | null;
+    usd_foil?: string | number | null;
+    eur?: string | number | null;
+    tix?: string | number | null;
+  };
   promo?: boolean;
   finishes?: string[];
   frame_effects?: string[];
 };
 
+function resolveSet(card: ScryfallCard): SetNested | null {
+  if (typeof card.set === "object" && card.set && "code" in card.set) {
+    const s = card.set as SetNested;
+    return s.code ? s : null;
+  }
+  if (typeof card.set === "string" && card.set.length > 0) {
+    return {
+      code: card.set,
+      name: card.set_name ?? card.set,
+      released_at: card.released_at ?? null,
+      set_type: card.set_type ?? null,
+      digital: Boolean(card.digital),
+    };
+  }
+  return null;
+}
+
 function releaseCutoff(card: ScryfallCard): string | null {
-  const d = card.released_at || card.set?.released_at || null;
-  return d;
+  const s = resolveSet(card);
+  return card.released_at || s?.released_at || null;
+}
+
+function priceMaybe(v: string | number | null | undefined): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = parseFloat(String(v).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
 }
 
 function passesPoc(card: ScryfallCard): boolean {
@@ -87,8 +120,11 @@ async function main() {
   await downloadBulk(def.download_uri, tmp);
 
   const db = openDbAt(dbPath);
-  db.exec("BEGIN");
-  const clear = [
+  let committed = false;
+  let n = 0;
+  try {
+    db.exec("BEGIN");
+    const clear = [
     "DELETE FROM owned_cards",
     "DELETE FROM watchlist",
     "DELETE FROM pinned",
@@ -118,33 +154,34 @@ async function main() {
      VALUES (@scryfall_id,@usd,@usd_foil,NULL,@eur,NULL,@tix,datetime('now'))`,
   );
 
-  const seenSets = new Set<string>();
-  let n = 0;
-  const readStream = fs.createReadStream(tmp);
-  const pipelineChain = chain([readStream, parser(), streamArray()]);
+    const seenSets = new Set<string>();
+    const readStream = fs.createReadStream(tmp);
+    const pipelineChain = chain([readStream, parser(), streamArray()]);
 
-  for await (const chunk of pipelineChain) {
+    for await (const chunk of pipelineChain) {
     const card = (chunk as { value: ScryfallCard }).value;
     if (!card || card.object !== "card") continue;
+    const layout = (card as { layout?: string }).layout;
+    if (layout === "token" || layout === "double_faced_token" || layout === "emblem") continue;
     if (!passesPoc(card)) continue;
-    if (card.digital || card.set?.digital) continue;
-    const set = card.set;
-    if (!set?.code) continue;
+    const setInfo = resolveSet(card);
+    if (!setInfo) continue;
+    if (card.digital || setInfo.digital) continue;
 
-    const setCode = set.code;
+    const setCode = setInfo.code;
     if (!seenSets.has(setCode)) {
       seenSets.add(setCode);
       insSet.run({
         code: setCode,
-        name: set.name,
-        release_date: set.released_at ?? null,
-        set_type: set.set_type ?? null,
+        name: setInfo.name,
+        release_date: setInfo.released_at ?? card.released_at ?? null,
+        set_type: setInfo.set_type ?? null,
         icon_svg_path: `/set-icons/${setCode}.svg`,
-        is_digital: set.digital ? 1 : 0,
+        is_digital: setInfo.digital ? 1 : 0,
       });
     }
 
-    const rel = releaseCutoff(card) ?? set.released_at ?? null;
+    const rel = releaseCutoff(card) ?? setInfo.released_at ?? null;
     const finishes = JSON.stringify(card.finishes ?? []);
     const frameFx = JSON.stringify(card.frame_effects ?? []);
     const foilOnly = card.finishes?.length === 1 && card.finishes[0] === "foil" ? 1 : 0;
@@ -185,27 +222,47 @@ async function main() {
     const pr = card.prices ?? {};
     insPrice.run({
       scryfall_id: card.id,
-      usd: pr.usd ?? null,
-      usd_foil: pr.usd_foil ?? null,
-      eur: pr.eur ?? null,
-      tix: pr.tix ?? null,
+      usd: priceMaybe(pr.usd),
+      usd_foil: priceMaybe(pr.usd_foil),
+      eur: priceMaybe(pr.eur),
+      tix: priceMaybe(pr.tix),
     });
 
     n++;
-    if (n % 50_000 === 0) console.log("…", n, "printings");
-  }
+      if (n % 50_000 === 0) console.log("…", n, "printings");
+    }
 
-  const today = new Date().toISOString().slice(0, 10);
-  db.prepare(
-    `INSERT OR REPLACE INTO prices_history (scryfall_id, snapshot_date, usd, usd_foil, eur, tix)
+    const today = new Date().toISOString().slice(0, 10);
+    db.prepare(
+      `INSERT OR REPLACE INTO prices_history (scryfall_id, snapshot_date, usd, usd_foil, eur, tix)
      SELECT scryfall_id, ?, usd, usd_foil, eur, tix FROM prices_current`,
-  ).run(today);
+    ).run(today);
 
-  seedSpecialGroups(db);
+    seedSpecialGroups(db);
 
-  db.exec("COMMIT");
-  db.close();
-  fs.unlinkSync(tmp);
+    db.exec("COMMIT");
+    committed = true;
+  } catch (err) {
+    if (!committed) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
+  } finally {
+    try {
+      db.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+  }
   console.log("Refresh complete:", n, "printings ingested (POC cutoff).");
 }
 

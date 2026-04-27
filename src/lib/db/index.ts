@@ -6,6 +6,10 @@ import { INIT_SQL } from "@/lib/db/schema";
 
 let dbInstance: Database.Database | null = null;
 
+export function getDbFilePath(): string {
+  return resolveDbPath();
+}
+
 function resolveDbPath(): string {
   const raw = process.env.DATABASE_URL ?? "./data/mtg.db";
   const cleaned = raw.replace(/^file:/, "").replace(/^\.\//, "");
