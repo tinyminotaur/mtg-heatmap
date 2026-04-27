@@ -27,10 +27,7 @@ function asciiUserAgent(raw: string, maxLen = 256): string {
   return t || "mtg-heatmap/1.0 (+https://github.com/tinyminotaur/mtg-heatmap)";
 }
 
-const UA = asciiUserAgent(
-  (process.env.SCRYFALL_USER_AGENT ?? "").trim() ||
-    "mtg-heatmap/1.0 (+https://github.com/tinyminotaur/mtg-heatmap)",
-);
+const UA = asciiUserAgent((process.env.SCRYFALL_USER_AGENT ?? "").trim());
 
 const dbPath = getDbFilePath();
 

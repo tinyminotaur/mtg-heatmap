@@ -37,7 +37,8 @@ jobs:
 
       - name: Bulk refresh (Scryfall default_cards)
         env:
-          SCRYFALL_USER_AGENT: ${{ secrets.SCRYFALL_USER_AGENT }}
+          # Always ASCII for fetch() headers; when secret is unset, avoid legacy Unicode defaults.
+          SCRYFALL_USER_AGENT: ${{ secrets.SCRYFALL_USER_AGENT != '' && secrets.SCRYFALL_USER_AGENT || format('mtg-heatmap/1.0 (+https://github.com/{0})', github.repository) }}
         run: pnpm db:refresh
 
       - name: Publish mtg.db to release db-nightly
