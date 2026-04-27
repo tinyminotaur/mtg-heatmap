@@ -13,6 +13,9 @@ const resolveCol = path.join(root, "src/lib/heatmap-column-resolve.ts");
 const logPath = path.join(root, ".cursor/debug-e53e3b.log");
 const endpoint =
   "http://127.0.0.1:7544/ingest/d3bac746-7f30-4189-a378-b3d32ca27dd5";
+/** Cursor debug log + local ingest only; Vercel/CI has no `.cursor/` and must not call localhost. */
+const debugLogEnabled =
+  process.env.VERCEL !== "1" && process.env.CI !== "true" && process.env.CI !== "1";
 
 const text = fs.readFileSync(file, "utf8");
 const lines = text.split("\n");
@@ -68,12 +71,19 @@ const payload = {
 };
 
 // #region agent log
-fs.appendFileSync(logPath, `${JSON.stringify(payload)}\n`);
-fetch(endpoint, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "e53e3b" },
-  body: JSON.stringify(payload),
-}).catch(() => {});
+if (debugLogEnabled) {
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `${JSON.stringify(payload)}\n`);
+  } catch {
+    /* ignore log failures */
+  }
+  fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "e53e3b" },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
 // #endregion
 
 const bad =
