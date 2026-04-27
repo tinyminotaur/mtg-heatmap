@@ -55,8 +55,9 @@ export function HeatmapView() {
   const rowSortSelectValue = useMemo(() => normalizedRowSort(sp), [sp]);
 
   useEffect(() => {
-    const rawCol = sp.get("colSort");
-    const rawSort = sp.get("sort");
+    const s = new URLSearchParams(queryString);
+    const rawCol = s.get("colSort");
+    const rawSort = s.get("sort");
     // #region agent log
     fetch("http://127.0.0.1:7544/ingest/d3bac746-7f30-4189-a378-b3d32ca27dd5", {
       method: "POST",
@@ -76,7 +77,7 @@ export function HeatmapView() {
       }),
     }).catch(() => {});
     // #endregion
-  }, [sp, colSortSelectValue, rowSortSelectValue]);
+  }, [queryString, colSortSelectValue, rowSortSelectValue]);
 
   const { data, isLoading, error } = useQuery<HeatmapResponse>({
     queryKey: ["heatmap", queryString],
