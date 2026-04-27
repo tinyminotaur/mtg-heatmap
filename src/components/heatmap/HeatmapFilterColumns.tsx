@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SetIcon } from "@/components/heatmap/SetIcon";
+import { normalizedColSort } from "@/lib/heatmap-url-params";
 
 type CatalogSet = {
   code: string;
@@ -47,6 +48,7 @@ type Props = {
 
 export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
   const sp = useMemo(() => new URLSearchParams(searchParamsString), [searchParamsString]);
+  const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
   const [setSearch, setSetSearch] = useState("");
   const catalogUrl = `/api/sets/catalog?${new URLSearchParams({
     ...(sp.get("digital") === "1" ? { digital: "1" } : {}),
@@ -107,7 +109,7 @@ export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
         <div className="space-y-2">
           <Label>Column order</Label>
           <Select
-            value={sp.get("colSort") ?? "release"}
+            value={colSortSelectValue}
             onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
           >
             <SelectTrigger className="w-full">

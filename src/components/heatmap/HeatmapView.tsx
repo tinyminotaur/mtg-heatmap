@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
 import type { PriceMode } from "@/lib/price-scale";
+import { normalizedColSort, normalizedRowSort } from "@/lib/heatmap-url-params";
 import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
 import { HeatmapFilterColumns } from "./HeatmapFilterColumns";
 import { HeatmapGrid } from "./HeatmapGrid";
@@ -50,6 +51,33 @@ export function HeatmapView() {
   const dark = resolvedTheme !== "light";
 
   const queryString = useMemo(() => sp.toString(), [sp]);
+  const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
+  const rowSortSelectValue = useMemo(() => normalizedRowSort(sp), [sp]);
+
+  useEffect(() => {
+    const rawCol = sp.get("colSort");
+    const rawSort = sp.get("sort");
+    // #region agent log
+    fetch("http://127.0.0.1:7544/ingest/d3bac746-7f30-4189-a378-b3d32ca27dd5", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "e53e3b" },
+      body: JSON.stringify({
+        sessionId: "e53e3b",
+        hypothesisId: "H_empty_select_value",
+        location: "HeatmapView.tsx",
+        message: "sort URL params vs normalized Select values",
+        data: {
+          rawCol,
+          rawSort,
+          colSortSelectValue,
+          rowSortSelectValue,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [sp, colSortSelectValue, rowSortSelectValue]);
+
   const { data, isLoading, error } = useQuery<HeatmapResponse>({
     queryKey: ["heatmap", queryString],
     queryFn: () => fetchJson(`/api/heatmap?${queryString}`),
@@ -317,7 +345,7 @@ export function HeatmapView() {
             ⌘K
           </button>
           <Select
-            value={sp.get("colSort") ?? "release"}
+            value={colSortSelectValue}
             onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
           >
             <SelectTrigger
@@ -373,7 +401,7 @@ export function HeatmapView() {
                 </div>
                 <div className="space-y-2">
                   <Label>Sort rows</Label>
-                  <Select value={sp.get("sort") ?? "name"} onValueChange={(v) => setParam("sort", v)}>
+                  <Select value={rowSortSelectValue} onValueChange={(v) => setParam("sort", v)}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
