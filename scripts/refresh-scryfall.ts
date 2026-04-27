@@ -10,14 +10,14 @@ import { chain } from "stream-chain";
 import { parser } from "stream-json";
 import streamArray from "stream-json/streamers/stream-array.js";
 import type Database from "better-sqlite3";
-import { openDbAt } from "../src/lib/db";
+import { getDbFilePath, openDbAt } from "../src/lib/db";
 import { LOCAL_USER_ID, POC_RELEASE_CUTOFF } from "../src/lib/constants";
 
 const UA =
   process.env.SCRYFALL_USER_AGENT ||
   "mtg-heatmap/1.0 (https://github.com/tinyminotaur/mtg-heatmap — replace with your contact)";
 
-const dbPath = path.join(process.cwd(), process.env.DATABASE_URL?.replace(/^\.\//, "") || "data/mtg.db");
+const dbPath = getDbFilePath();
 
 type SetNested = {
   code: string;

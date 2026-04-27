@@ -1,0 +1,62 @@
+# Scryfall default_cards bulk → SQLite, publish mtg.db for Vercel (REMOTE_MTG_DB_URL).
+# Triggers: nightly schedule, manual workflow_dispatch, or repository_dispatch (e.g. GET /api/cron/scryfall on Vercel).
+name: Scryfall nightly
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [scryfall-refresh]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scryfall-nightly
+  cancel-in-progress: true
+
+jobs:
+  refresh-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Bulk refresh (Scryfall default_cards)
+        env:
+          SCRYFALL_USER_AGENT: ${{ secrets.SCRYFALL_USER_AGENT }}
+        run: pnpm db:refresh
+
+      - name: Publish mtg.db to release db-nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if gh release view db-nightly >/dev/null 2>&1; then
+            gh release upload db-nightly data/mtg.db --clobber
+          else
+            gh release create db-nightly data/mtg.db --title "Nightly mtg.db" --notes "Scryfall bulk POC cutoff. Overwritten by CI."
+          fi
+
+      - name: Trigger Vercel production deploy
+        env:
+          VERCEL_DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$VERCEL_DEPLOY_HOOK_URL" ]; then
+            curl -fsS -X POST "$VERCEL_DEPLOY_HOOK_URL"
+          else
+            echo "No VERCEL_DEPLOY_HOOK_URL — set repo secret to auto-redeploy after DB publish."
+          fi
