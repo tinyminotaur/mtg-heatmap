@@ -34,7 +34,7 @@ Set **`NEXT_PUBLIC_SITE_URL`** to your canonical URL (e.g. `https://mtg.tinymino
 
 Workflow: [`.github/workflows/scryfall-nightly.yml`](.github/workflows/scryfall-nightly.yml)
 
-1. **Repo secret `SCRYFALL_USER_AGENT`** — optional but recommended ([Scryfall guidance](https://scryfall.com/docs/api)); use **plain ASCII** (no “smart” punctuation). If unset, CI uses `mtg-heatmap/1.0 (+https://github.com/<owner>/<repo>)` from the workflow.
+1. **Repo secret `SCRYFALL_USER_AGENT`** — optional ([Scryfall guidance](https://scryfall.com/docs/api)); must be **plain ASCII** (smart dashes / Unicode in `fetch` headers break Node). If unset, the refresh script uses a built-in ASCII default.
 2. **Optional `VERCEL_DEPLOY_HOOK_URL`** — create a [Deploy Hook](https://vercel.com/docs/deploy-hooks) in the Vercel project and add it as a repo secret so each successful refresh triggers a production redeploy (pulls the new `mtg.db` via `REMOTE_MTG_DB_URL`).
 3. **Vercel env `REMOTE_MTG_DB_URL`** — set to the `releases/download/db-nightly/mtg.db` URL above so production builds bundle the nightly DB.
 
