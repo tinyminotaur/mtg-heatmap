@@ -817,7 +817,7 @@ export function HeatmapView() {
           >
             <Select
               value={heatmapColumnLayout}
-              onValueChange={(v) => setParam("hlay", v === "value" ? "value" : null)}
+              onValueChange={(v) => setParam("hlay", v === "value" ? "value" : "sets")}
             >
               <SelectTrigger className="h-9 w-[min(100vw-8rem,12.5rem)] text-xs">
                 <SelectValue placeholder="Heatmap columns" />

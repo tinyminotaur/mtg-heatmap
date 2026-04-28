@@ -175,6 +175,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   const portRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [viewportW, setViewportW] = useState(0);
   const setImagesRef = useRef(new Map<string, HTMLImageElement>());
   const [setIconsEpoch, setSetIconsEpoch] = useState(0);
   const lastHoverWithCellRef = useRef<{ r: number; c: number; cell: CellDTO } | null>(null);
@@ -201,6 +202,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           scrollTop: scrollEl.scrollTop,
           row,
           col,
+          frozenColW: effFrozenColW,
+          rollupW: effRollupW,
         });
       },
       scrollCellIntoView(row: number, col: number) {
@@ -234,12 +237,15 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         onViewportChange?.();
       },
     }),
-    [rows.length, columns.length, onViewportChange],
+    [rows.length, columns.length, onViewportChange, effFrozenColW, effRollupW],
   );
 
   const gridW = columns.length * HEATMAP_COL_WIDTH;
   const gridH = rows.length * HEATMAP_ROW_HEIGHT;
-  const totalW = HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + gridW;
+  const effFrozenColW =
+    viewportW > 0 && viewportW < 520 ? Math.max(220, Math.floor(viewportW * 0.58)) : HEATMAP_FROZEN_COL_W;
+  const effRollupW = viewportW > 0 && viewportW < 520 ? 0 : HEATMAP_FROZEN_ROLLUP_W;
+  const totalW = effFrozenColW + effRollupW + gridW;
   const totalH = HEATMAP_HEADER_H + gridH;
 
   const draw = useCallback(() => {
@@ -278,15 +284,17 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       viewportHeight: vh,
       columnsLength: columns.length,
       rowsLength: rows.length,
+      frozenColW: effFrozenColW,
+      rollupW: effRollupW,
     });
 
     // Scrollable data area only (never paint under frozen headers)
     ctx.save();
     ctx.beginPath();
     ctx.rect(
-      HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W,
+      effFrozenColW + effRollupW,
       HEATMAP_HEADER_H,
-      Math.max(0, vw - (HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W)),
+      Math.max(0, vw - (effFrozenColW + effRollupW)),
       Math.max(0, vh - HEATMAP_HEADER_H),
     );
     ctx.clip();
@@ -298,9 +306,9 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       const vy = docY - st;
       if (vy >= vh || vy + HEATMAP_ROW_HEIGHT <= HEATMAP_HEADER_H) continue;
       for (let c = firstCol; c <= lastCol; c++) {
-        const docX = HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + c * HEATMAP_COL_WIDTH;
+        const docX = effFrozenColW + effRollupW + c * HEATMAP_COL_WIDTH;
         const vx = docX - sl;
-        if (vx >= vw || vx + HEATMAP_COL_WIDTH <= HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W) continue;
+        if (vx >= vw || vx + HEATMAP_COL_WIDTH <= effFrozenColW + effRollupW) continue;
         const cell = row.cells[c];
         const strictHide = Boolean(
           cell && matchMode === "strict" && cell.printing_matches === false,
@@ -351,8 +359,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ctx.lineWidth = 1;
     const dataBottom = Math.min(vh, HEATMAP_HEADER_H + gridH - st);
     for (let c = firstCol; c <= lastCol; c++) {
-      const vx = HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + c * HEATMAP_COL_WIDTH - sl;
-      if (vx >= vw || vx + HEATMAP_COL_WIDTH <= HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W) continue;
+      const vx = effFrozenColW + effRollupW + c * HEATMAP_COL_WIDTH - sl;
+      if (vx >= vw || vx + HEATMAP_COL_WIDTH <= effFrozenColW + effRollupW) continue;
       ctx.beginPath();
       ctx.moveTo(vx + 0.5, HEATMAP_HEADER_H);
       ctx.lineTo(vx + 0.5, dataBottom);
@@ -361,7 +369,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     for (let r = firstRow; r <= lastRow; r++) {
       const hY = HEATMAP_HEADER_H + r * HEATMAP_ROW_HEIGHT - st;
       if (hY >= vh || hY + HEATMAP_ROW_HEIGHT <= HEATMAP_HEADER_H) continue;
-      const x0 = HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W;
+      const x0 = effFrozenColW + effRollupW;
       const x1 = Math.min(vw, totalW - sl);
       if (x1 <= x0) continue;
       ctx.beginPath();
@@ -374,17 +382,17 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ctx.save();
     ctx.beginPath();
     ctx.rect(
-      HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W,
+      effFrozenColW + effRollupW,
       0,
-      Math.max(0, vw - (HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W)),
+      Math.max(0, vw - (effFrozenColW + effRollupW)),
       HEATMAP_HEADER_H,
     );
     ctx.clip();
     for (let j = firstCol; j <= lastCol; j++) {
       const c = columns[j];
       if (!c) continue;
-      const vx = HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + j * HEATMAP_COL_WIDTH - sl;
-      if (vx >= vw || vx + HEATMAP_COL_WIDTH <= HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W) continue;
+      const vx = effFrozenColW + effRollupW + j * HEATMAP_COL_WIDTH - sl;
+      if (vx >= vw || vx + HEATMAP_COL_WIDTH <= effFrozenColW + effRollupW) continue;
       ctx.fillStyle = headerBg;
       ctx.fillRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
       ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
@@ -459,7 +467,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ctx.rect(
       0,
       HEATMAP_HEADER_H,
-      HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W,
+      effFrozenColW + effRollupW,
       Math.max(0, vh - HEATMAP_HEADER_H),
     );
     ctx.clip();
@@ -470,21 +478,21 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       const vy = docY - st;
       if (vy >= vh || vy + HEATMAP_ROW_HEIGHT <= HEATMAP_HEADER_H) continue;
       ctx.fillStyle = rowLabelBg;
-      ctx.fillRect(0, vy, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W, HEATMAP_ROW_HEIGHT);
+      ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       if (row.pinned) {
         ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.2)" : "rgba(147, 51, 234, 0.14)";
-        ctx.fillRect(0, vy, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W, HEATMAP_ROW_HEIGHT);
+        ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       if (row.watchlisted) {
         ctx.fillStyle = dark ? "rgba(59, 130, 246, 0.16)" : "rgba(37, 99, 235, 0.12)";
-        ctx.fillRect(0, vy, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W, HEATMAP_ROW_HEIGHT);
+        ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       if (row.owned_qty > 0) {
         ctx.fillStyle = dark ? "rgba(234, 179, 8, 0.14)" : "rgba(202, 138, 4, 0.12)";
-        ctx.fillRect(0, vy, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W, HEATMAP_ROW_HEIGHT);
+        ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       ctx.strokeStyle = dark ? "#1f2937" : "#e5e7eb";
-      ctx.strokeRect(0, vy, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W, HEATMAP_ROW_HEIGHT);
+      ctx.strokeRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       fillIdentityStrip(ctx, 0, vy, HEATMAP_IDENTITY_STRIP_W, HEATMAP_ROW_HEIGHT, row.color_identity);
       const midY = vy + HEATMAP_ROW_HEIGHT / 2;
       drawTypeGlyphInStrip(ctx, HEATMAP_IDENTITY_STRIP_W / 2, midY, typeLineToManaGlyph(row.type_line));
@@ -496,11 +504,11 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       const truncated = label.length > maxChars ? `${label.slice(0, maxChars - 1)}…` : label;
       ctx.fillText(truncated, nameX, midY + 4);
       if (row.mana_cost) {
-        drawManaCostRight(ctx, HEATMAP_FROZEN_COL_W - 4, midY + 4, row.mana_cost);
+        drawManaCostRight(ctx, effFrozenColW - 4, midY + 4, row.mana_cost);
       }
       // Printings rollup column (right of name column).
-      {
-        const rx0 = HEATMAP_FROZEN_COL_W;
+      if (effRollupW > 0) {
+        const rx0 = effFrozenColW;
         ctx.strokeStyle = dark ? "#374151" : "#cbd5e1";
         ctx.beginPath();
         ctx.moveTo(rx0 + 0.5, vy);
@@ -510,7 +518,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
-        ctx.fillText(String(row.printings_count ?? 0), rx0 + HEATMAP_FROZEN_ROLLUP_W - 6, midY + 1);
+        ctx.fillText(String(row.printings_count ?? 0), rx0 + effRollupW - 6, midY + 1);
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
       }
@@ -518,45 +526,47 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillStyle = dark ? "#fbbf24" : "#b45309";
         ctx.strokeStyle = dark ? "#fbbf24" : "#b45309";
         ctx.lineWidth = 1;
-        ctx.strokeRect(1.5, vy + 1.5, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W - 3, HEATMAP_ROW_HEIGHT - 3);
+        ctx.strokeRect(1.5, vy + 1.5, effFrozenColW + effRollupW - 3, HEATMAP_ROW_HEIGHT - 3);
         ctx.font = "bold 9px ui-monospace";
-        ctx.fillText(String(row.owned_qty), HEATMAP_FROZEN_COL_W - 14, midY + 3);
+        ctx.fillText(String(row.owned_qty), effFrozenColW - 14, midY + 3);
       }
     }
     ctx.restore();
 
     ctx.fillStyle = headerBg;
-    ctx.fillRect(0, 0, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W, HEATMAP_HEADER_H);
+    ctx.fillRect(0, 0, effFrozenColW + effRollupW, HEATMAP_HEADER_H);
     ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
-    ctx.strokeRect(0, 0, HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W, HEATMAP_HEADER_H);
+    ctx.strokeRect(0, 0, effFrozenColW + effRollupW, HEATMAP_HEADER_H);
     ctx.fillStyle = muted;
     ctx.font = "11px system-ui";
     ctx.fillText("Card", 8, HEATMAP_HEADER_H / 2 + 4);
     // Printings header.
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(HEATMAP_FROZEN_COL_W, 0, HEATMAP_FROZEN_ROLLUP_W, HEATMAP_HEADER_H);
-    ctx.clip();
-    ctx.strokeStyle = dark ? "#374151" : "#cbd5e1";
-    ctx.beginPath();
-    ctx.moveTo(HEATMAP_FROZEN_COL_W + 0.5, 0);
-    ctx.lineTo(HEATMAP_FROZEN_COL_W + 0.5, HEATMAP_HEADER_H);
-    ctx.stroke();
-    ctx.fillStyle = muted;
-    ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("Print", HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W / 2, HEATMAP_HEADER_H / 2 + 4);
-    ctx.restore();
+    if (effRollupW > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(effFrozenColW, 0, effRollupW, HEATMAP_HEADER_H);
+      ctx.clip();
+      ctx.strokeStyle = dark ? "#374151" : "#cbd5e1";
+      ctx.beginPath();
+      ctx.moveTo(effFrozenColW + 0.5, 0);
+      ctx.lineTo(effFrozenColW + 0.5, HEATMAP_HEADER_H);
+      ctx.stroke();
+      ctx.fillStyle = muted;
+      ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Print", effFrozenColW + effRollupW / 2, HEATMAP_HEADER_H / 2 + 4);
+      ctx.restore();
+    }
 
     ctx.strokeStyle = dark ? "#4b5563" : "#cbd5e1";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + 0.5, 0);
-    ctx.lineTo(HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + 0.5, vh);
+    ctx.moveTo(effFrozenColW + effRollupW + 0.5, 0);
+    ctx.lineTo(effFrozenColW + effRollupW + 0.5, vh);
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + 0.5, HEATMAP_HEADER_H + 0.5);
+    ctx.moveTo(effFrozenColW + effRollupW + 0.5, HEATMAP_HEADER_H + 0.5);
     ctx.lineTo(vw + 0.5, HEATMAP_HEADER_H + 0.5);
     ctx.stroke();
 
@@ -567,10 +577,10 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       selectedRow < rows.length
     ) {
       const vx =
-        HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W + selectedCol * HEATMAP_COL_WIDTH - sl;
+        effFrozenColW + effRollupW + selectedCol * HEATMAP_COL_WIDTH - sl;
       const vy = HEATMAP_HEADER_H + selectedRow * HEATMAP_ROW_HEIGHT - st;
       if (
-        vx + HEATMAP_COL_WIDTH > HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W &&
+        vx + HEATMAP_COL_WIDTH > effFrozenColW + effRollupW &&
         vx < vw &&
         vy + HEATMAP_ROW_HEIGHT > HEATMAP_HEADER_H &&
         vy < vh
@@ -581,7 +591,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setIconsEpoch bumps draw when set SVGs finish loading (not referenced inside draw)
-  }, [columns, dark, gridH, matchMode, priceMode, rows, selectedCol, selectedRow, setIconsEpoch, totalW]);
+  }, [columns, dark, effFrozenColW, effRollupW, gridH, matchMode, priceMode, rows, selectedCol, selectedRow, setIconsEpoch, totalW]);
 
   useEffect(() => {
     let cancelled = false;
@@ -632,9 +642,11 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       scrollTop: scrollEl.scrollTop,
       row: h.r,
       col: h.c,
+      frozenColW: effFrozenColW,
+      rollupW: effRollupW,
     });
     onHoverCell(h.r, h.c, cell, a.left + a.width / 2, a.top + a.height / 2, a);
-  }, [rows, matchMode, priceMode, onHoverCell, onLeaveGrid]);
+  }, [rows, matchMode, priceMode, onHoverCell, onLeaveGrid, effFrozenColW, effRollupW]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -646,6 +658,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       onViewportChange?.();
     };
     const onResize = () => {
+      setViewportW(el.clientWidth);
       draw();
       refreshHoverAfterScroll();
       onViewportChange?.();
@@ -654,6 +667,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     const ro = new ResizeObserver(onResize);
     ro.observe(el);
     if (port) ro.observe(port);
+    setViewportW(el.clientWidth);
     return () => {
       el.removeEventListener("scroll", onScroll);
       ro.disconnect();
@@ -687,10 +701,10 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       onHeaderSetClick &&
       y >= 0 &&
       y < HEATMAP_HEADER_H &&
-        x >= HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W &&
+      x >= effFrozenColW + effRollupW &&
       columns.length > 0
     ) {
-        const col = Math.floor((x - (HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W)) / HEATMAP_COL_WIDTH);
+      const col = Math.floor((x - (effFrozenColW + effRollupW)) / HEATMAP_COL_WIDTH);
       if (col >= 0 && col < columns.length) {
         const code = columns[col]!.code;
         if (!code.startsWith("__")) onHeaderSetClick(code);
@@ -705,6 +719,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       scrollTop: scrollEl.scrollTop,
       columnsLength: columns.length,
       rowsLength: rows.length,
+      frozenColW: effFrozenColW,
+      rollupW: effRollupW,
     });
     if (!hit) return;
     onSelectCell(hit.row, hit.col);
@@ -723,6 +739,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       scrollTop: scrollEl.scrollTop,
       columnsLength: columns.length,
       rowsLength: rows.length,
+      frozenColW: effFrozenColW,
+      rollupW: effRollupW,
     });
     if (!hit) {
       lastHoverWithCellRef.current = null;
@@ -741,6 +759,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       scrollTop: scrollEl.scrollTop,
       row: hit.row,
       col: hit.col,
+      frozenColW: effFrozenColW,
+      rollupW: effRollupW,
     });
     lastHoverWithCellRef.current = { r: hit.row, c: hit.col, cell: cell! };
     onHoverCell(hit.row, hit.col, cell!, e.clientX, e.clientY, anchor);
@@ -776,6 +796,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       scrollTop: scrollEl.scrollTop,
       columnsLength: columns.length,
       rowsLength: rows.length,
+      frozenColW: effFrozenColW,
+      rollupW: effRollupW,
     });
     if (!hit) return;
     cancelLongPress();
