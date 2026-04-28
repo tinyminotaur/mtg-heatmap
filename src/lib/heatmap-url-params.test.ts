@@ -142,9 +142,10 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
           op: "or",
           rules: [
             { field: "reserved", op: "is", value: true },
-            { field: "price_visible_usd_like", op: "gte", value: 10 },
+            { field: "price", op: "gte", value: 10, currency: "usd_like", scope: "visible" },
           ],
         },
+        { field: "finish", op: "in", value: ["foil"] },
       ],
     };
     const sp = new URLSearchParams({ filters: encodeAdvancedFiltersParam(g) });

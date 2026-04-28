@@ -3,6 +3,10 @@ export type FilterGroup = {
   rules: Array<FilterGroup | FilterRule>;
 };
 
+export type PriceCurrency = "usd" | "usd_like" | "usd_foil" | "eur" | "tix";
+export type PriceScope = "any" | "visible";
+export type PriceOp = "gt" | "gte" | "lt" | "lte" | "between";
+
 export type FilterRule =
   | { field: "name"; op: "contains"; value: string }
   | { field: "name"; op: "not_contains"; value: string }
@@ -24,11 +28,27 @@ export type FilterRule =
   | { field: "set_type"; op: "in"; value: string[] }
   | { field: "set_type"; op: "not_in"; value: string[] }
   | { field: "release_year"; op: "between"; value: [number, number] }
-  | { field: "price_usd_like"; op: "gt" | "lt"; value: number }
-  | { field: "price_usd_like"; op: "gte" | "lte"; value: number }
+  // Back-compat: older price rules.
+  | { field: "price_usd_like"; op: "gt" | "gte" | "lt" | "lte"; value: number }
   | { field: "price_usd_like"; op: "between"; value: [number, number] }
   | { field: "price_visible_usd_like"; op: "gt" | "gte" | "lt" | "lte"; value: number }
   | { field: "price_visible_usd_like"; op: "between"; value: [number, number] }
+  // New generalized price rule.
+  | {
+      field: "price";
+      op: PriceOp;
+      value: number | [number, number];
+      currency: PriceCurrency;
+      scope: PriceScope;
+    }
+  // Printing-level fields.
+  | { field: "finish"; op: "in" | "not_in"; value: string[] } // foil|nonfoil|etched...
+  | { field: "frame_effect"; op: "in" | "not_in"; value: string[] }
+  | { field: "collector_number"; op: "eq" | "contains" | "prefix"; value: string }
+  | { field: "promo"; op: "is"; value: boolean }
+  | { field: "foil_only"; op: "is"; value: boolean }
+  | { field: "nonfoil_only"; op: "is"; value: boolean }
+  | { field: "digital_set"; op: "is"; value: boolean }
   | { field: "owned"; op: "is"; value: boolean }
   | { field: "watchlist"; op: "is"; value: boolean }
   | { field: "pinned"; op: "is"; value: boolean };
@@ -50,6 +70,26 @@ function isNumberTuple2(v: unknown): v is [number, number] {
     typeof v[1] === "number" &&
     Number.isFinite(v[1])
   );
+}
+
+function isString(v: unknown): v is string {
+  return typeof v === "string";
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+function isPriceCurrency(v: unknown): v is PriceCurrency {
+  return v === "usd" || v === "usd_like" || v === "usd_foil" || v === "eur" || v === "tix";
+}
+
+function isPriceScope(v: unknown): v is PriceScope {
+  return v === "any" || v === "visible";
+}
+
+function isPriceOp(v: unknown): v is PriceOp {
+  return v === "gt" || v === "gte" || v === "lt" || v === "lte" || v === "between";
 }
 
 export function parseAdvancedFiltersFromJson(v: unknown): FilterGroup | null {
@@ -95,6 +135,27 @@ export function parseAdvancedFiltersFromJson(v: unknown): FilterGroup | null {
     else if (field === "price_visible_usd_like" && (rop === "gt" || rop === "gte" || rop === "lt" || rop === "lte") && typeof value === "number" && Number.isFinite(value))
       parsed.push({ field, op: rop, value });
     else if (field === "price_visible_usd_like" && rop === "between" && isNumberTuple2(value)) parsed.push({ field, op: rop, value });
+    else if (field === "price" && isPriceOp(rop) && (isFiniteNumber(value) || isNumberTuple2(value))) {
+      const currency = (r as Record<string, unknown>).currency;
+      const scope = (r as Record<string, unknown>).scope;
+      if (isPriceCurrency(currency) && isPriceScope(scope)) {
+        parsed.push({
+          field: "price",
+          op: rop,
+          value: value as number | [number, number],
+          currency,
+          scope,
+        });
+      }
+    }
+    else if (field === "finish" && (rop === "in" || rop === "not_in") && isStringArray(value)) parsed.push({ field, op: rop, value });
+    else if (field === "frame_effect" && (rop === "in" || rop === "not_in") && isStringArray(value)) parsed.push({ field, op: rop, value });
+    else if (field === "collector_number" && (rop === "eq" || rop === "contains" || rop === "prefix") && isString(value))
+      parsed.push({ field, op: rop, value });
+    else if (field === "promo" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
+    else if (field === "foil_only" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
+    else if (field === "nonfoil_only" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
+    else if (field === "digital_set" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "owned" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "watchlist" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "pinned" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
@@ -136,6 +197,75 @@ export function compileAdvancedFiltersToSql(
   opts: { userId: string; priceSetCodes?: string[]; allowVisiblePrice?: boolean },
 ): { sql: string; params: unknown[] } {
   const params: unknown[] = [];
+  const priceExpr = (currency: PriceCurrency): string => {
+    switch (currency) {
+      case "usd":
+        return `pc.usd`;
+      case "usd_foil":
+        // Prefer foil when available, fallback to non-foil.
+        return `CASE WHEN pc.usd_foil IS NOT NULL AND pc.usd_foil > 0 THEN pc.usd_foil
+             WHEN pc.usd IS NOT NULL AND pc.usd > 0 THEN pc.usd
+             ELSE NULL END`;
+      case "eur":
+        return `pc.eur`;
+      case "tix":
+        return `pc.tix`;
+      default:
+        return `COALESCE(pc.usd, pc.usd_foil)`;
+    }
+  };
+
+  const priceExists = (
+    scope: PriceScope,
+    currency: PriceCurrency,
+    op: "cmp" | "between",
+    cmp: { operator?: ">" | ">=" | "<" | "<="; value?: number; range?: [number, number] },
+  ): string => {
+    const vExpr = priceExpr(currency);
+    const restrictVisible = scope === "visible";
+    if (restrictVisible) {
+      if (opts.allowVisiblePrice === false) return "";
+      const codes = (opts.priceSetCodes ?? []).filter(Boolean);
+      if (!codes.length) return "0=1";
+      const ph = codes.map(() => "?").join(",");
+      if (op === "cmp") {
+        params.push(...codes, cmp.value);
+        return `EXISTS (
+          SELECT 1 FROM printings p JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+          WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph})
+            AND (${vExpr}) IS NOT NULL AND (${vExpr}) ${cmp.operator} ?
+        )`;
+      }
+      const [a0, b0] = cmp.range!;
+      const a = Math.min(a0, b0);
+      const b = Math.max(a0, b0);
+      params.push(...codes, a, b);
+      return `EXISTS (
+        SELECT 1 FROM printings p JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+        WHERE p.oracle_id = c.oracle_id AND p.set_code IN (${ph})
+          AND (${vExpr}) IS NOT NULL AND (${vExpr}) BETWEEN ? AND ?
+      )`;
+    }
+
+    if (op === "cmp") {
+      params.push(cmp.value);
+      return `EXISTS (
+        SELECT 1 FROM printings p JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+        WHERE p.oracle_id = c.oracle_id
+          AND (${vExpr}) IS NOT NULL AND (${vExpr}) ${cmp.operator} ?
+      )`;
+    }
+    const [a0, b0] = cmp.range!;
+    const a = Math.min(a0, b0);
+    const b = Math.max(a0, b0);
+    params.push(a, b);
+    return `EXISTS (
+      SELECT 1 FROM printings p JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+      WHERE p.oracle_id = c.oracle_id
+        AND (${vExpr}) IS NOT NULL AND (${vExpr}) BETWEEN ? AND ?
+    )`;
+  };
+
   const compile = (node: FilterGroup | FilterRule): string => {
     if ((node as FilterGroup).rules) {
       const grp = node as FilterGroup;
@@ -293,6 +423,69 @@ export function compileAdvancedFiltersToSql(
             AND pv.set_code IN (${ph})
             AND COALESCE(pcv.usd, pcv.usd_foil) IS NOT NULL
             AND COALESCE(pcv.usd, pcv.usd_foil) BETWEEN ? AND ?
+        )`;
+      }
+      case "price": {
+        if (r.op === "between") {
+          const v = r.value as unknown;
+          if (!Array.isArray(v) || v.length !== 2) return "";
+          const [a, b] = v as [number, number];
+          return priceExists(r.scope, r.currency, "between", { range: [a, b] });
+        }
+        const op = r.op === "gt" ? ">" : r.op === "gte" ? ">=" : r.op === "lt" ? "<" : "<=";
+        if (typeof r.value !== "number" || !Number.isFinite(r.value)) return "";
+        return priceExists(r.scope, r.currency, "cmp", { operator: op, value: r.value });
+      }
+      case "finish": {
+        const xs = r.value.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+        if (!xs.length) return "";
+        const parts: string[] = [];
+        for (const x of xs) {
+          params.push(`"${x}"`);
+          parts.push(`instr(LOWER(COALESCE(p.finishes, '')), ?) > 0`);
+        }
+        const inner = `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND (${parts.join(" OR ")}))`;
+        return r.op === "not_in" ? `(NOT ${inner})` : inner;
+      }
+      case "frame_effect": {
+        const xs = r.value.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+        if (!xs.length) return "";
+        const parts: string[] = [];
+        for (const x of xs) {
+          params.push(`"${x}"`);
+          parts.push(`instr(LOWER(COALESCE(p.frame_effects, '')), ?) > 0`);
+        }
+        const inner = `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND (${parts.join(" OR ")}))`;
+        return r.op === "not_in" ? `(NOT ${inner})` : inner;
+      }
+      case "collector_number": {
+        const v = r.value.trim();
+        if (!v) return "";
+        if (r.op === "eq") {
+          params.push(v);
+          return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.collector_number = ?)`;
+        }
+        if (r.op === "prefix") {
+          params.push(`${v}%`);
+          return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.collector_number LIKE ?)`;
+        }
+        params.push(`%${v}%`);
+        return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.collector_number LIKE ?)`;
+      }
+      case "promo": {
+        return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.is_promo = ${r.value ? 1 : 0})`;
+      }
+      case "foil_only": {
+        return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.is_foil_only = ${r.value ? 1 : 0})`;
+      }
+      case "nonfoil_only": {
+        return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.is_nonfoil_only = ${r.value ? 1 : 0})`;
+      }
+      case "digital_set": {
+        return `EXISTS (
+          SELECT 1 FROM printings p
+          INNER JOIN sets s ON s.code = p.set_code
+          WHERE p.oracle_id = c.oracle_id AND s.is_digital = ${r.value ? 1 : 0}
         )`;
       }
       case "owned":
