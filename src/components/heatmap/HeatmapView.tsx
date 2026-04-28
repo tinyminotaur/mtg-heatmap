@@ -262,9 +262,11 @@ export function HeatmapView() {
   const queryString = useMemo(() => sp.toString(), [sp]);
   const urlFilters = useMemo(() => parseHeatmapUrlSearchParams(sp), [sp]);
 
-  const { data, isLoading, error } = useQuery<HeatmapResponse>({
+  const { data, isLoading, isFetching, error } = useQuery<HeatmapResponse>({
     queryKey: ["heatmap", queryString],
     queryFn: () => fetchJson(`/api/heatmap?${queryString}`),
+    // Keep rendering the previous heatmap while the next one loads (no “blink out”).
+    placeholderData: (prev) => prev,
   });
 
   const { data: statusData } = useQuery<StatusResponse>({
@@ -969,9 +971,9 @@ export function HeatmapView() {
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col max-sm:min-h-[40dvh]">
-        {isLoading ? (
+        {!data && isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : error ? (
+        ) : !data && error ? (
           <div className="text-sm text-destructive">
             <p>Failed to load heatmap.</p>
             {error instanceof Error && error.message !== "500" ? (
@@ -979,60 +981,69 @@ export function HeatmapView() {
             ) : null}
           </div>
         ) : (
-          <HeatmapGrid
-            ref={heatmapGridRef}
-            columns={columns}
-            rows={rows}
-            priceMode={priceMode}
-            dark={dark}
-            matchMode={heatmapMatchMode}
-            selectedRow={rowIndex}
-            selectedCol={colIndex}
-            onSelectCell={(r, c) => {
-              setSelR(r);
-              setSelC(c);
-              const cell = rows[r]?.cells[c] ?? null;
-              setPreviewPinned(
-                cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode),
-              );
-            }}
-            onHoverCell={(r, c, cell, x, y, anchor) => {
-              cancelHoverDismiss();
-              setNameRowHover(null);
-              setEditionHeaderHover(null);
-              if (!cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode)) {
-                setHover(null);
-                return;
+          <div className="relative min-h-0 min-w-0 flex-1">
+            <HeatmapGrid
+              ref={heatmapGridRef}
+              columns={columns}
+              rows={rows}
+              priceMode={priceMode}
+              dark={dark}
+              matchMode={heatmapMatchMode}
+              selectedRow={rowIndex}
+              selectedCol={colIndex}
+              onSelectCell={(r, c) => {
+                setSelR(r);
+                setSelC(c);
+                const cell = rows[r]?.cells[c] ?? null;
+                setPreviewPinned(
+                  cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode),
+                );
+              }}
+              onHoverCell={(r, c, cell, x, y, anchor) => {
+                cancelHoverDismiss();
+                setNameRowHover(null);
+                setEditionHeaderHover(null);
+                if (!cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode)) {
+                  setHover(null);
+                  return;
+                }
+                setHover({ row: r, col: c, cell, x, y, anchor });
+              }}
+              onLeaveGrid={clearHoverNow}
+              cardPreviewContainerRef={cardPreviewRef}
+              cardPreviewContains={hoverPreviewContains}
+              onViewportChange={bumpPinnedAnchor}
+              interactionPortRef={heatmapPortRef}
+              onHeaderSetClick={(setCode) => setParam("hcol", setCode)}
+              onHoverFrozenRowBody={
+                previewPinned || isMobile
+                  ? undefined
+                  : (row, x, y, anchor) => {
+                      cancelHoverDismiss();
+                      setHover(null);
+                      setEditionHeaderHover(null);
+                      setNameRowHover({ row, x, y, anchor });
+                    }
               }
-              setHover({ row: r, col: c, cell, x, y, anchor });
-            }}
-            onLeaveGrid={clearHoverNow}
-            cardPreviewContainerRef={cardPreviewRef}
-            cardPreviewContains={hoverPreviewContains}
-            onViewportChange={bumpPinnedAnchor}
-            interactionPortRef={heatmapPortRef}
-            onHeaderSetClick={(setCode) => setParam("hcol", setCode)}
-            onHoverFrozenRowBody={
-              previewPinned || isMobile
-                ? undefined
-                : (row, x, y, anchor) => {
-                    cancelHoverDismiss();
-                    setHover(null);
-                    setEditionHeaderHover(null);
-                    setNameRowHover({ row, x, y, anchor });
-                  }
-            }
-            onHoverEditionHeader={
-              previewPinned || isMobile
-                ? undefined
-                : (col, x, y, anchor) => {
-                    cancelHoverDismiss();
-                    setHover(null);
-                    setNameRowHover(null);
-                    setEditionHeaderHover({ col, x, y, anchor });
-                  }
-            }
-          />
+              onHoverEditionHeader={
+                previewPinned || isMobile
+                  ? undefined
+                  : (col, x, y, anchor) => {
+                      cancelHoverDismiss();
+                      setHover(null);
+                      setNameRowHover(null);
+                      setEditionHeaderHover({ col, x, y, anchor });
+                    }
+              }
+            />
+            {isFetching ? (
+              <div className="pointer-events-none absolute inset-0 flex items-start justify-end p-2">
+                <div className="rounded-md border border-border bg-background/70 px-2 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                  Updating…
+                </div>
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
 
