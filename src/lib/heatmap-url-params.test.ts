@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type HeatmapFilters, defaultHeatmapFilters } from "@/lib/filter-state";
 import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
+import { encodeAdvancedFiltersParam, type FilterGroup } from "@/lib/heatmap/advanced-filters";
 
 describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", () => {
   it("round-trips layered year + price (11.14#1 style)", () => {
@@ -130,5 +131,27 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     const again = parseHeatmapUrlSearchParams(sp);
     expect(again.sortSlots[0]?.key).toBe("price_min");
     expect(again.sortSlots[0]?.dir).toBe("asc");
+  });
+
+  it("parses and round-trips advanced filters via filters= base64url", () => {
+    const g: FilterGroup = {
+      op: "and",
+      rules: [
+        { field: "name", op: "contains", value: "Lotus" },
+        {
+          op: "or",
+          rules: [
+            { field: "reserved", op: "is", value: true },
+            { field: "price_usd_like", op: "gt", value: 10 },
+          ],
+        },
+      ],
+    };
+    const sp = new URLSearchParams({ filters: encodeAdvancedFiltersParam(g) });
+    const f = parseHeatmapUrlSearchParams(sp);
+    expect(f.advancedFilters).toEqual(g);
+    const out = serializeHeatmapUrlParams(f as HeatmapFilters);
+    const again = parseHeatmapUrlSearchParams(out);
+    expect(again.advancedFilters).toEqual(g);
   });
 });

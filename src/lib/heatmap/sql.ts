@@ -1,4 +1,6 @@
 import type { HeatmapFilters } from "@/lib/filter-state";
+import { compileAdvancedFiltersToSql } from "@/lib/heatmap/advanced-filters";
+import { LOCAL_USER_ID } from "@/lib/constants";
 
 export function groupKeyExpr(f: HeatmapFilters): string | null {
   switch (f.groupBy) {
@@ -80,6 +82,13 @@ export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unkno
   if (f.cmcMax != null) {
     parts.push(`COALESCE(c.cmc, 0) <= ?`);
     params.push(f.cmcMax);
+  }
+  if (f.advancedFilters) {
+    const adv = compileAdvancedFiltersToSql(f.advancedFilters, { userId: LOCAL_USER_ID });
+    if (adv.sql.trim()) {
+      parts.push(adv.sql);
+      params.push(...adv.params);
+    }
   }
   return { sql: parts.join(" AND "), params };
 }

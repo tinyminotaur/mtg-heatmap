@@ -11,6 +11,7 @@ import {
   parseSortSlotsFromUrl,
   slotsToPrimarySortString,
 } from "@/lib/filter-state";
+import { decodeAdvancedFiltersParam, encodeAdvancedFiltersParam } from "@/lib/heatmap/advanced-filters";
 
 /** Allowed URL param values for controlled Selects (invalid → safe default). */
 export const COL_SORT_OPTIONS = ["release", "release_desc", "code", "name", "type_release"] as const;
@@ -112,6 +113,7 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
   const colors = merged.get("colors")?.split(",").filter(Boolean) ?? [];
   const formats = merged.get("formats")?.split(",").filter(Boolean) ?? [];
   const types = merged.get("types")?.split(",").filter(Boolean) ?? [];
+  const advancedFilters = merged.get("filters") ? decodeAdvancedFiltersParam(String(merged.get("filters"))) : null;
   const yearMin = merged.get("yearMin") ? Number(merged.get("yearMin")) : null;
   const yearMax = merged.get("yearMax") ? Number(merged.get("yearMax")) : null;
   const cmcMin = merged.get("cmcMin") ? Number(merged.get("cmcMin")) : null;
@@ -150,6 +152,7 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     colors,
     formats,
     types,
+    advancedFilters,
     yearMin: Number.isFinite(yearMin as number) ? yearMin : null,
     yearMax: Number.isFinite(yearMax as number) ? yearMax : null,
     cmcMin: Number.isFinite(cmcMin as number) ? cmcMin : null,
@@ -216,6 +219,7 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.colors.length) out.set("colors", f.colors.join(","));
   if (f.formats.length) out.set("formats", f.formats.join(","));
   if (f.types.length) out.set("types", f.types.join(","));
+  if (f.advancedFilters) out.set("filters", encodeAdvancedFiltersParam(f.advancedFilters));
   if (f.yearMin != null) out.set("yearMin", String(f.yearMin));
   if (f.yearMax != null) out.set("yearMax", String(f.yearMax));
   if (f.cmcMin != null) out.set("cmcMin", String(f.cmcMin));
@@ -269,6 +273,7 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
         k === "sets" ||
         k === "hideSets" ||
         k === "sk" ||
+        k === "filters" ||
         k === "qr" ||
         k === "qc"
       )

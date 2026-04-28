@@ -77,6 +77,8 @@ export type HeatmapFilters = {
    * Set-column cell tint still uses client-side Price dropdown only; for value layout this drives API.
    */
   cellPriceField: "usd" | "usd_foil" | "eur" | "tix";
+  /** Advanced rule-based filters serialized in URL `filters=` (base64url JSON). */
+  advancedFilters: import("@/lib/heatmap/advanced-filters").FilterGroup | null;
 };
 
 export type FilterState = {
@@ -165,6 +167,7 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   quickPinCols: [],
   heatmapColumnLayout: "sets",
   cellPriceField: "usd",
+  advancedFilters: null,
 };
 
 export const DEFAULT_FILTER_STATE: FilterState = {
@@ -312,6 +315,7 @@ export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
     cellPriceField: fs.display.cellPriceField,
     quickPinRows: [...fs.filters.quickPinRows],
     quickPinCols: [...fs.filters.quickPinCols],
+    advancedFilters: null,
   };
 }
 
