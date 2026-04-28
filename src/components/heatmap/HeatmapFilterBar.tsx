@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, MoreHorizontal, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,6 +19,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -82,33 +83,6 @@ const SORT_LABEL: Record<SortSlot["key"], string> = {
   price_median: "Median $",
 };
 
-function FoldSection({
-  title,
-  open,
-  onOpenChange,
-  children,
-}: {
-  title: string;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/10">
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium outline-none hover:bg-muted/40"
-        onClick={() => onOpenChange(!open)}
-        aria-expanded={open}
-      >
-        <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
-        {title}
-      </button>
-      {open ? <div className="border-t border-border px-3 py-3">{children}</div> : null}
-    </div>
-  );
-}
-
 export function HeatmapFilterBar({
   queryString,
   columns,
@@ -124,17 +98,20 @@ export function HeatmapFilterBar({
   onOpenKeyboardHelp,
   onPersistNav,
 }: Props) {
+  const router = useRouter();
   const f = useMemo(() => filtersFromQuery(queryString), [queryString]);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [newName, setNewName] = useState("");
-
-  const [openViews, setOpenViews] = useState(false);
-  const [openRows, setOpenRows] = useState(false);
-  const [openCols, setOpenCols] = useState(false);
-  const [openSearch, setOpenSearch] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     startTransition(() => setSavedViews(ensureSavedViewsLoaded()));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -180,12 +157,34 @@ export function HeatmapFilterBar({
     setNewName("");
   }, [newName, queryString, savedViews, onViewSessionChange]);
 
+  const quickNewView = useCallback(() => {
+    const name = `View ${savedViews.length + 1}`;
+    const v: SavedView = {
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      query: queryString,
+    };
+    const next = upsertSavedView(savedViews, v);
+    setSavedViews(next);
+    onViewSessionChange({ activeViewId: v.id, snapshotQuery: queryString });
+  }, [queryString, savedViews, onViewSessionChange]);
+
   const patch = useCallback(
     (mut: (base: HeatmapFilters) => HeatmapFilters) => {
       const base = filtersFromQuery(queryString);
       applyFilters(onReplaceQuery, mut(base));
     },
     [onReplaceQuery, queryString],
+  );
+
+  const applySearchDebounced = useCallback(
+    (text: string) => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => {
+        patch((b) => ({ ...b, search: text }));
+      }, 320);
+    },
+    [patch],
   );
 
   const setSortSlots = (slots: SortSlot[]) => {
@@ -222,510 +221,559 @@ export function HeatmapFilterBar({
     });
   };
 
+  const showEmptyPatch = {
+    checked: f.showEmptyColumns,
+    onChange: (v: boolean) => patch((b) => ({ ...b, showEmptyColumns: v })),
+  };
+
   return (
     <div
-      className="flex shrink-0 flex-col gap-2 rounded-lg border border-border bg-muted/20 text-sm"
+      className="flex min-h-0 shrink-0 flex-col rounded-lg border border-border bg-muted/20 text-sm"
       suppressHydrationWarning
     >
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left outline-none hover:bg-muted/35"
-        onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
-        aria-expanded={filtersRootOpen}
-      >
-        <ChevronRight
-          className={cn(
-            "size-4 shrink-0 text-muted-foreground transition-transform",
-            filtersRootOpen && "rotate-90",
-          )}
-        />
-        <span className="font-medium">Filters &amp; sorts</span>
-        <Badge variant="secondary" className="ml-auto font-normal">
-          F to toggle
-        </Badge>
-      </button>
+      {/* Toolbar: matches wireframe — toggle, title, views, search, more */}
+      <div className="flex min-h-10 w-full items-center gap-1.5 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
+        <button
+          type="button"
+          className="flex shrink-0 items-center gap-1 rounded-md p-1 hover:bg-muted/50"
+          onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
+          aria-expanded={filtersRootOpen}
+          aria-label={filtersRootOpen ? "Collapse filters" : "Expand filters"}
+        >
+          <ChevronRight
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              filtersRootOpen && "rotate-90",
+            )}
+          />
+        </button>
+        <span className="hidden shrink-0 font-medium sm:inline">Filter &amp; Sort</span>
+
+        <div className="min-h-8 min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex w-max items-center gap-1 pr-1">
+            {savedViews.map((v) => (
+              <Button
+                key={v.id}
+                type="button"
+                variant={activeViewId === v.id ? "secondary" : "outline"}
+                size="sm"
+                className="h-8 shrink-0 rounded-full px-3 text-xs"
+                onClick={() => selectView(v)}
+              >
+                {v.name}
+                {activeViewId === v.id && dirty ? (
+                  <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" title="Unsaved" />
+                ) : null}
+              </Button>
+            ))}
+            <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2 text-xs" onClick={quickNewView}>
+              + New
+            </Button>
+          </div>
+        </div>
+
+        <div className="relative min-w-0 max-w-[42%] sm:max-w-[220px]">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="heatmap-search"
+            className="h-8 border-border/80 bg-background pl-8 text-xs"
+            placeholder="Search cards…"
+            defaultValue={f.search}
+            key={cardSearchMountKey}
+            onChange={(e) => applySearchDebounced(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+                patch((b) => ({ ...b, search: (e.target as HTMLInputElement).value }));
+              }
+            }}
+          />
+        </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon" }),
+              "size-8 shrink-0 sm:size-9",
+            )}
+            aria-label="More view and display options"
+          >
+            <MoreHorizontal className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {activeViewId ? (
+              <>
+                <DropdownMenuItem disabled={!dirty} onClick={saveActiveView}>
+                  Save view
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">New saved view</DropdownMenuLabel>
+            <div className="flex gap-2 px-2 pb-2">
+              <Input
+                placeholder="Name"
+                className="h-8 text-xs"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+              />
+              <Button type="button" size="sm" className="h-8 shrink-0 text-xs" onClick={createView}>
+                Save as…
+              </Button>
+            </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => {
+                onPersistNav?.();
+                router.push("/owned");
+              }}
+            >
+              Owned
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                onPersistNav?.();
+                router.push("/watchlist");
+              }}
+            >
+              Watchlist
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onOpenCommandPalette}>Command palette (⌘K)</DropdownMenuItem>
+            <DropdownMenuItem onClick={onOpenKeyboardHelp}>Keyboard shortcuts (?)</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {activeViewId ? (
+              <>
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (!activeViewId) return;
+                    setSavedViews(duplicateSavedView(savedViews, activeViewId));
+                  }}
+                >
+                  Duplicate view
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => {
+                    if (!activeViewId) return;
+                    const next = deleteSavedView(savedViews, activeViewId);
+                    setSavedViews(next);
+                    onViewSessionChange({ activeViewId: null, snapshotQuery: null });
+                  }}
+                >
+                  Delete view
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            <DropdownMenuLabel className="text-xs">Display</DropdownMenuLabel>
+            <div className="space-y-2 px-2 pb-2">
+              <div className="space-y-1">
+                <span className="text-[10px] text-muted-foreground">Price field</span>
+                <Select
+                  value={f.cellPriceField}
+                  onValueChange={(v) =>
+                    patch((b) => ({
+                      ...b,
+                      cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="usd">USD</SelectItem>
+                    <SelectItem value="usd_foil">USD foil</SelectItem>
+                    <SelectItem value="eur">EUR</SelectItem>
+                    <SelectItem value="tix">TIX</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] text-muted-foreground">Density</span>
+                <Select value={density} onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="comfy">Comfy</SelectItem>
+                    <SelectItem value="compact">Compact</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  checked={f.matchMode === "strict"}
+                  onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
+                />
+                Strict cells
+              </label>
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox checked={f.showPinned} onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))} />
+                Pinned strip
+              </label>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {filtersRootOpen ? (
-        <div className="border-t border-border px-3 pb-3">
-          <div className="grid grid-cols-1 gap-3 pt-3 xl:grid-cols-2">
-            <FoldSection title="Views" open={openViews} onOpenChange={setOpenViews}>
-              <div className="space-y-3">
-                <div className="flex flex-wrap gap-1">
-                  {savedViews.map((v) => (
-                    <Button
-                      key={v.id}
-                      type="button"
-                      variant={activeViewId === v.id ? "secondary" : "ghost"}
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => selectView(v)}
-                    >
-                      {v.name}
-                      {activeViewId === v.id && dirty ? (
-                        <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" title="Unsaved" />
-                      ) : null}
-                    </Button>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {activeViewId ? (
-                    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" disabled={!dirty} onClick={saveActiveView}>
-                      Save view
-                    </Button>
-                  ) : null}
-                  <Input
-                    placeholder="New view name"
-                    className="h-8 max-w-[10rem] text-xs"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                  />
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={createView}>
-                    Save as…
-                  </Button>
-                </div>
-
-                <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-                  <Link
-                    href="/owned"
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 text-xs")}
-                    onClick={() => onPersistNav?.()}
-                  >
-                    Owned
-                  </Link>
-                  <Link
-                    href="/watchlist"
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 text-xs")}
-                    onClick={() => onPersistNav?.()}
-                  >
-                    Watchlist
-                  </Link>
-                  <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={onOpenCommandPalette}>
-                    Command ⌘K
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={onOpenKeyboardHelp}>
-                    Keyboard ?
-                  </Button>
-                </div>
-
-                <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.priceMode} side="right">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">Price field</Label>
-                      <Select
-                        value={f.cellPriceField}
-                        onValueChange={(v) =>
-                          patch((b) => ({
-                            ...b,
-                            cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
-                          }))
-                        }
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="usd">USD (non-foil)</SelectItem>
-                          <SelectItem value="usd_foil">USD foil</SelectItem>
-                          <SelectItem value="eur">EUR</SelectItem>
-                          <SelectItem value="tix">TIX</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </FilterFieldTip>
-                  <FilterFieldTip tip="Compact reduces padding and chrome for small screens." side="right">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">Layout density</Label>
-                      <Select value={density} onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="comfy">Comfy</SelectItem>
-                          <SelectItem value="compact">Compact</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </FilterFieldTip>
-                </div>
-
-                <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-border pt-3">
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.matchStrict}>
-                    <label className="flex cursor-help items-center gap-2 text-xs">
-                      <Checkbox
-                        checked={f.matchMode === "strict"}
-                        onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
-                      />
-                      Strict cells
-                    </label>
-                  </FilterFieldTip>
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.showPinnedStrip}>
-                    <label className="flex cursor-help items-center gap-2 text-xs">
-                      <Checkbox checked={f.showPinned} onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))} />
-                      Pinned strip
-                    </label>
-                  </FilterFieldTip>
-                </div>
-
-                {activeViewId ? (
-                  <div className="flex flex-wrap justify-end gap-2 border-t border-dashed border-border pt-3">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        if (!activeViewId) return;
-                        setSavedViews(duplicateSavedView(savedViews, activeViewId));
-                      }}
-                    >
-                      Duplicate
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs text-destructive"
-                      onClick={() => {
-                        if (!activeViewId) return;
-                        const next = deleteSavedView(savedViews, activeViewId);
-                        setSavedViews(next);
-                        onViewSessionChange({ activeViewId: null, snapshotQuery: null });
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            </FoldSection>
-
-            <FoldSection title="Rows" open={openRows} onOpenChange={setOpenRows}>
-              <div className="space-y-4">
-                <FilterFieldTip tip={HEATMAP_FILTER_TIPS.facetsBadge} side="right">
-                  <Badge variant="secondary" className="font-normal">
-                    {f.rarity.length || f.yearMin != null || f.yearMax != null || f.priceMin != null || f.priceMax != null
-                      ? "Facets on"
-                      : "No numeric facets"}
-                  </Badge>
-                </FilterFieldTip>
-
-                <div className="flex flex-wrap items-end gap-2">
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.primarySort} side="right">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Sort rows</Label>
-                      <Select
-                        value={primarySort.key}
-                        onValueChange={(key) => {
-                          const k = key as SortSlot["key"];
-                          const dir: SortSlot["dir"] =
-                            k === "price_min" ? "asc" : k.startsWith("price_") ? "desc" : null;
-                          setSortSlots([{ key: k, dir }]);
-                        }}
-                      >
-                        <SelectTrigger className="h-8 w-[11rem] text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(Object.keys(SORT_LABEL) as SortSlot["key"][]).map((k) => (
-                            <SelectItem key={k} value={k}>
-                              {SORT_LABEL[k]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </FilterFieldTip>
-                  {primarySort.key.startsWith("price_") ? (
-                    <Select
-                      value={primarySort.dir ?? (primarySort.key === "price_min" ? "asc" : "desc")}
-                      onValueChange={(dir) => {
-                        const d = dir as "asc" | "desc";
-                        setSortSlots([{ ...primarySort, dir: d }, ...f.sortSlots.slice(1, 3)]);
-                      }}
-                    >
-                      <SelectTrigger className="h-8 w-24 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="asc">Asc</SelectItem>
-                        <SelectItem value="desc">Desc</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  ) : null}
-                  <FilterFieldTip
-                    tip={f.valueAggScope === "all" ? HEATMAP_FILTER_TIPS.valueAggAll : HEATMAP_FILTER_TIPS.valueAggVisible}
-                    side="right"
-                  >
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">$ aggregate scope</Label>
-                      <Select
-                        value={f.valueAggScope}
-                        onValueChange={(v) => patch((b) => ({ ...b, valueAggScope: v === "all" ? "all" : "visible" }))}
-                      >
-                        <SelectTrigger className="h-8 w-40 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="visible">Visible columns</SelectItem>
-                          <SelectItem value="all">All printings</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </FilterFieldTip>
-                </div>
-
-                {f.sortSlots.length > 1 ? (
-                  <p className="text-xs text-muted-foreground">
-                    +{f.sortSlots.length - 1} tiebreak via <code className="rounded bg-muted px-1">sk=</code> in URL
-                  </p>
-                ) : null}
-
-                <div className="flex flex-wrap items-end gap-2">
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.groupBy} side="right">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Group rows</Label>
-                      <Select
-                        value={f.groupBy}
-                        onValueChange={(v) =>
-                          patch((b) => ({
-                            ...b,
-                            groupBy: v === "reserved" || v === "color" || v === "type" ? v : "none",
-                            groupCollapsedKeys: [],
-                          }))
-                        }
-                      >
-                        <SelectTrigger className="h-8 w-36 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          <SelectItem value="reserved">Reserved</SelectItem>
-                          <SelectItem value="color">Color (CI)</SelectItem>
-                          <SelectItem value="type">Type prefix</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </FilterFieldTip>
-                  {f.groupCollapsedKeys.length ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs"
-                      onClick={() => patch((b) => ({ ...b, groupCollapsedKeys: [] }))}
-                    >
-                      Expand all groups
-                    </Button>
-                  ) : null}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetYear} side="right">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Year min</Label>
-                      <Input
-                        type="number"
-                        className="h-8 text-xs"
-                        value={f.yearMin ?? ""}
-                        onChange={(e) =>
-                          patch((b) => ({
-                            ...b,
-                            yearMin: e.target.value === "" ? null : Number(e.target.value),
-                          }))
-                        }
-                      />
-                    </div>
-                  </FilterFieldTip>
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetYear} side="right">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Year max</Label>
-                      <Input
-                        type="number"
-                        className="h-8 text-xs"
-                        value={f.yearMax ?? ""}
-                        onChange={(e) =>
-                          patch((b) => ({
-                            ...b,
-                            yearMax: e.target.value === "" ? null : Number(e.target.value),
-                          }))
-                        }
-                      />
-                    </div>
-                  </FilterFieldTip>
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetPrice} side="right">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Price min $</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="h-8 text-xs"
-                        value={f.priceMin ?? ""}
-                        onChange={(e) =>
-                          patch((b) => ({
-                            ...b,
-                            priceMin: e.target.value === "" ? null : Number(e.target.value),
-                          }))
-                        }
-                      />
-                    </div>
-                  </FilterFieldTip>
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetPrice} side="right">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Price max $</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="h-8 text-xs"
-                        value={f.priceMax ?? ""}
-                        onChange={(e) =>
-                          patch((b) => ({
-                            ...b,
-                            priceMax: e.target.value === "" ? null : Number(e.target.value),
-                          }))
-                        }
-                      />
-                    </div>
-                  </FilterFieldTip>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
-                    >
-                      Rarity: {raritySummary}
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-52" align="start">
-                      <DropdownMenuLabel className="text-xs">Rarities (multi)</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {RARITIES.map((r) => (
-                        <DropdownMenuCheckboxItem
-                          key={r}
-                          checked={f.rarity.includes(r)}
-                          onCheckedChange={() => toggleRarity(r)}
-                          className="capitalize"
-                        >
-                          {r}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
-                    >
-                      Row scope{rowOptionsCount ? ` (${rowOptionsCount})` : ""}
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-60" align="start">
-                      <DropdownMenuLabel className="text-xs">Restrict rows</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuCheckboxItem
-                        checked={f.includeDigital}
-                        onCheckedChange={(v) => patch((b) => ({ ...b, includeDigital: Boolean(v) }))}
-                      >
-                        Include digital sets
-                      </DropdownMenuCheckboxItem>
-                      <DropdownMenuCheckboxItem
-                        checked={Boolean(f.reservedOnly)}
-                        onCheckedChange={(v) => patch((b) => ({ ...b, reservedOnly: v ? true : null }))}
-                      >
-                        Reserved List only
-                      </DropdownMenuCheckboxItem>
-                      <DropdownMenuCheckboxItem
-                        checked={f.owned === true}
-                        onCheckedChange={(v) => patch((b) => ({ ...b, owned: v ? true : null }))}
-                      >
-                        Owned only
-                      </DropdownMenuCheckboxItem>
-                      <DropdownMenuCheckboxItem
-                        checked={f.watchlist === true}
-                        onCheckedChange={(v) => patch((b) => ({ ...b, watchlist: v ? true : null }))}
-                      >
-                        Watchlist only
-                      </DropdownMenuCheckboxItem>
-                      <DropdownMenuCheckboxItem
-                        checked={f.pinned === true}
-                        onCheckedChange={(v) => patch((b) => ({ ...b, pinned: v ? true : null }))}
-                      >
-                        Pinned only
-                      </DropdownMenuCheckboxItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                <FilterFieldTip tip={HEATMAP_FILTER_TIPS.specialGroup} side="right">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Special group slug</Label>
-                    <Input
-                      className="h-8 text-xs"
-                      value={f.specialGroup ?? ""}
-                      onChange={(e) => patch((b) => ({ ...b, specialGroup: e.target.value.trim() || null }))}
-                      placeholder="e.g. power_nine"
-                    />
-                  </div>
-                </FilterFieldTip>
-
-                <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
-                  {f.headerSortSetCode ? (
-                    <Badge variant="outline" className="gap-1 font-mono text-[10px]">
-                      Col sort: {f.headerSortSetCode.toUpperCase()}
-                      <button
-                        type="button"
-                        className="ml-1 rounded hover:bg-muted"
-                        aria-label="Clear column sort"
-                        onClick={() => patch((b) => ({ ...b, headerSortSetCode: null }))}
-                      >
-                        ×
-                      </button>
+        <div className="max-h-[min(58dvh,520px)] overflow-y-auto border-t border-border px-2 pb-3 pt-2 sm:max-h-[min(70dvh,720px)] sm:px-3">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            {/* Rows */}
+            <section className="rounded-lg border border-border bg-muted/10 p-3">
+              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Rows
+              </p>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,200px)]">
+                <div className="space-y-3 rounded-md border border-border/70 bg-background/40 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">Filter by</p>
+                  <HeatmapCardSearch key={cardSearchMountKey} queryString={queryString} onReplaceQuery={onReplaceQuery} />
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.facetsBadge} side="right">
+                    <Badge variant="secondary" className="font-normal">
+                      {f.rarity.length || f.yearMin != null || f.yearMax != null || f.priceMin != null || f.priceMax != null
+                        ? "Facets on"
+                        : "No numeric facets"}
                     </Badge>
-                  ) : null}
-                  {columns.length > 0 && columns[0]?.set_type !== "aggregate" ? (
-                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.headerColumnSort} side="top">
+                  </FilterFieldTip>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetYear} side="right">
                       <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Sort by column (click header)</Label>
-                        <Select
-                          value="__none__"
-                          onValueChange={(code) => {
-                            if (code === "__none__") return;
-                            patch((b) => ({ ...b, headerSortSetCode: code }));
-                          }}
-                        >
-                          <SelectTrigger className="h-8 w-[min(100%,13rem)] text-xs">
-                            <SelectValue placeholder="Pick a set column…" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Override: pick set…</SelectItem>
-                            {columns.map((c) => (
-                              <SelectItem key={c.code} value={c.code}>
-                                {c.code.toUpperCase()} — {c.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-xs">Year min</Label>
+                        <Input
+                          type="number"
+                          className="h-8 text-xs"
+                          value={f.yearMin ?? ""}
+                          onChange={(e) =>
+                            patch((b) => ({
+                              ...b,
+                              yearMin: e.target.value === "" ? null : Number(e.target.value),
+                            }))
+                          }
+                        />
                       </div>
                     </FilterFieldTip>
-                  ) : null}
+                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetYear} side="right">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Year max</Label>
+                        <Input
+                          type="number"
+                          className="h-8 text-xs"
+                          value={f.yearMax ?? ""}
+                          onChange={(e) =>
+                            patch((b) => ({
+                              ...b,
+                              yearMax: e.target.value === "" ? null : Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    </FilterFieldTip>
+                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetPrice} side="right">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Price min $</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          className="h-8 text-xs"
+                          value={f.priceMin ?? ""}
+                          onChange={(e) =>
+                            patch((b) => ({
+                              ...b,
+                              priceMin: e.target.value === "" ? null : Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    </FilterFieldTip>
+                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetPrice} side="right">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Price max $</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          className="h-8 text-xs"
+                          value={f.priceMax ?? ""}
+                          onChange={(e) =>
+                            patch((b) => ({
+                              ...b,
+                              priceMax: e.target.value === "" ? null : Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    </FilterFieldTip>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
+                      >
+                        Rarity: {raritySummary}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-52" align="start">
+                        <DropdownMenuLabel className="text-xs">Rarities (multi)</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {RARITIES.map((r) => (
+                          <DropdownMenuCheckboxItem
+                            key={r}
+                            checked={f.rarity.includes(r)}
+                            onCheckedChange={() => toggleRarity(r)}
+                            className="capitalize"
+                          >
+                            {r}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
+                      >
+                        Row scope{rowOptionsCount ? ` (${rowOptionsCount})` : ""}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-60" align="start">
+                        <DropdownMenuLabel className="text-xs">Restrict rows</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuCheckboxItem
+                          checked={f.includeDigital}
+                          onCheckedChange={(v) => patch((b) => ({ ...b, includeDigital: Boolean(v) }))}
+                        >
+                          Include digital sets
+                        </DropdownMenuCheckboxItem>
+                        <DropdownMenuCheckboxItem
+                          checked={Boolean(f.reservedOnly)}
+                          onCheckedChange={(v) => patch((b) => ({ ...b, reservedOnly: v ? true : null }))}
+                        >
+                          Reserved List only
+                        </DropdownMenuCheckboxItem>
+                        <DropdownMenuCheckboxItem
+                          checked={f.owned === true}
+                          onCheckedChange={(v) => patch((b) => ({ ...b, owned: v ? true : null }))}
+                        >
+                          Owned only
+                        </DropdownMenuCheckboxItem>
+                        <DropdownMenuCheckboxItem
+                          checked={f.watchlist === true}
+                          onCheckedChange={(v) => patch((b) => ({ ...b, watchlist: v ? true : null }))}
+                        >
+                          Watchlist only
+                        </DropdownMenuCheckboxItem>
+                        <DropdownMenuCheckboxItem
+                          checked={f.pinned === true}
+                          onCheckedChange={(v) => patch((b) => ({ ...b, pinned: v ? true : null }))}
+                        >
+                          Pinned only
+                        </DropdownMenuCheckboxItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.specialGroup} side="right">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Special group slug</Label>
+                      <Input
+                        className="h-8 text-xs"
+                        value={f.specialGroup ?? ""}
+                        onChange={(e) => patch((b) => ({ ...b, specialGroup: e.target.value.trim() || null }))}
+                        placeholder="e.g. power_nine"
+                      />
+                    </div>
+                  </FilterFieldTip>
                 </div>
 
+                <div className="flex flex-col gap-3">
+                  <div className="space-y-3 rounded-md border border-border/70 bg-background/40 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Sort by</p>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <FilterFieldTip tip={HEATMAP_FILTER_TIPS.primarySort} side="right">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Sort rows</Label>
+                          <Select
+                            value={primarySort.key}
+                            onValueChange={(key) => {
+                              const k = key as SortSlot["key"];
+                              const dir: SortSlot["dir"] =
+                                k === "price_min" ? "asc" : k.startsWith("price_") ? "desc" : null;
+                              setSortSlots([{ key: k, dir }]);
+                            }}
+                          >
+                            <SelectTrigger className="h-8 min-w-[10rem] text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(Object.keys(SORT_LABEL) as SortSlot["key"][]).map((k) => (
+                                <SelectItem key={k} value={k}>
+                                  {SORT_LABEL[k]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </FilterFieldTip>
+                      {primarySort.key.startsWith("price_") ? (
+                        <Select
+                          value={primarySort.dir ?? (primarySort.key === "price_min" ? "asc" : "desc")}
+                          onValueChange={(dir) => {
+                            const d = dir as "asc" | "desc";
+                            setSortSlots([{ ...primarySort, dir: d }, ...f.sortSlots.slice(1, 3)]);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-24 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="asc">Asc</SelectItem>
+                            <SelectItem value="desc">Desc</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : null}
+                      <FilterFieldTip
+                        tip={
+                          f.valueAggScope === "all" ? HEATMAP_FILTER_TIPS.valueAggAll : HEATMAP_FILTER_TIPS.valueAggVisible
+                        }
+                        side="right"
+                      >
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">$ aggregate scope</Label>
+                          <Select
+                            value={f.valueAggScope}
+                            onValueChange={(v) => patch((b) => ({ ...b, valueAggScope: v === "all" ? "all" : "visible" }))}
+                          >
+                            <SelectTrigger className="h-8 w-[10.5rem] text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="visible">Visible columns</SelectItem>
+                              <SelectItem value="all">All printings</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </FilterFieldTip>
+                    </div>
+                    {f.sortSlots.length > 1 ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        +{f.sortSlots.length - 1} tiebreak via <code className="rounded bg-muted px-1">sk=</code>
+                      </p>
+                    ) : null}
+                    <div className="flex flex-wrap items-end gap-2 border-t border-border/60 pt-2">
+                      {f.headerSortSetCode ? (
+                        <Badge variant="outline" className="gap-1 font-mono text-[10px]">
+                          Col sort: {f.headerSortSetCode.toUpperCase()}
+                          <button
+                            type="button"
+                            className="ml-1 rounded hover:bg-muted"
+                            aria-label="Clear column sort"
+                            onClick={() => patch((b) => ({ ...b, headerSortSetCode: null }))}
+                          >
+                            ×
+                          </button>
+                        </Badge>
+                      ) : null}
+                      {columns.length > 0 && columns[0]?.set_type !== "aggregate" ? (
+                        <FilterFieldTip tip={HEATMAP_FILTER_TIPS.headerColumnSort} side="top">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Sort by column</Label>
+                            <Select
+                              value="__none__"
+                              onValueChange={(code) => {
+                                if (code === "__none__") return;
+                                patch((b) => ({ ...b, headerSortSetCode: code }));
+                              }}
+                            >
+                              <SelectTrigger className="h-8 w-full min-w-0 text-xs">
+                                <SelectValue placeholder="Pick set column…" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">Pick set…</SelectItem>
+                                {columns.map((c) => (
+                                  <SelectItem key={c.code} value={c.code}>
+                                    {c.code.toUpperCase()} — {c.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </FilterFieldTip>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 rounded-md border border-border/70 bg-background/40 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Group by</p>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <FilterFieldTip tip={HEATMAP_FILTER_TIPS.groupBy} side="right">
+                        <div className="space-y-1">
+                          <Select
+                            value={f.groupBy}
+                            onValueChange={(v) =>
+                              patch((b) => ({
+                                ...b,
+                                groupBy: v === "reserved" || v === "color" || v === "type" ? v : "none",
+                                groupCollapsedKeys: [],
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-full text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              <SelectItem value="reserved">Reserved</SelectItem>
+                              <SelectItem value="color">Color (CI)</SelectItem>
+                              <SelectItem value="type">Type prefix</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </FilterFieldTip>
+                      {f.groupCollapsedKeys.length ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={() => patch((b) => ({ ...b, groupCollapsedKeys: [] }))}
+                        >
+                          Expand all groups
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </FoldSection>
+            </section>
 
-            <FoldSection title="Columns" open={openCols} onOpenChange={setOpenCols}>
-              <HeatmapFilterColumns
-                queryString={queryString}
-                onReplaceQuery={onReplaceQuery}
-                showEmptyColumns={{
-                  checked: f.showEmptyColumns,
-                  onChange: (v) => patch((b) => ({ ...b, showEmptyColumns: v })),
-                }}
-              />
-            </FoldSection>
-
-            <FoldSection title="Card search" open={openSearch} onOpenChange={setOpenSearch}>
-              <HeatmapCardSearch key={cardSearchMountKey} queryString={queryString} onReplaceQuery={onReplaceQuery} />
-            </FoldSection>
+            {/* Columns */}
+            <section className="rounded-lg border border-border bg-muted/10 p-3">
+              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Columns
+              </p>
+              <div className="flex flex-col gap-3">
+                <div className="rounded-md border border-border/70 bg-background/40 p-3">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">Filter by</p>
+                  <HeatmapFilterColumns
+                    variant="columnFilters"
+                    queryString={queryString}
+                    onReplaceQuery={onReplaceQuery}
+                    showEmptyColumns={showEmptyPatch}
+                  />
+                </div>
+                <div className="rounded-md border border-border/70 bg-background/40 p-3">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">Sort by</p>
+                  <HeatmapFilterColumns
+                    variant="columnSort"
+                    queryString={queryString}
+                    onReplaceQuery={onReplaceQuery}
+                    showEmptyColumns={showEmptyPatch}
+                  />
+                </div>
+              </div>
+            </section>
           </div>
+
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            <span className="sr-only">Tip:</span>
+            Press <kbd className="rounded border border-border px-1 font-mono text-[10px]">F</kbd> to toggle this panel.
+          </p>
         </div>
       ) : null}
     </div>

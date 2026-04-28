@@ -71,7 +71,7 @@ export function HeatmapCardSearch({ queryString, onReplaceQuery }: Props) {
       <div className="space-y-2">
         <p className="text-xs font-medium text-muted-foreground">Match card name</p>
         <Input
-          id="heatmap-search"
+          id="heatmap-card-search-expanded"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {

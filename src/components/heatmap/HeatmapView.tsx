@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "@/components/app-theme-provider";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -18,8 +19,8 @@ import { parseHeatmapCellPriceField, parseHeatmapUrlSearchParams } from "@/lib/h
 import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
 import { HeatmapFilterBar, type ViewSessionMeta } from "./HeatmapFilterBar";
 import { HeatmapGrid, type HeatmapCellAnchorRect, type HeatmapGridHandle } from "./HeatmapGrid";
-import { Legend } from "./Legend";
-import { Maximize2, X } from "lucide-react";
+import { HeatmapGuideDialog } from "./HeatmapGuideDialog";
+import { Bookmark, Library, Maximize2, Palette, Search, X } from "lucide-react";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -270,6 +271,11 @@ export function HeatmapView() {
   const sessionBootstrapped = useRef(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [modK, setModK] = useState("⌘K / Ctrl+K");
+  useEffect(() => {
+    setModK(/mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘K" : "Ctrl+K");
+  }, []);
   const goPending = useRef(false);
   const goTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -672,28 +678,50 @@ export function HeatmapView() {
         onApplySearch={(q) => setParam("q", q)}
       />
 
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight sm:text-xl">MTG Heatmap</h1>
-          <p className="hidden text-sm text-muted-foreground sm:block">
-            Rows = cards · Columns = all sets matching filters · POC ≤ 2005 · header row / name column
-            stay fixed while scrolling
-          </p>
-          {statusLine ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Data updates nightly (09:00 UTC) · Last updated:{" "}
-              <span className="font-mono">{statusLine.lastLabel}</span> · Next update:{" "}
-              <span className="font-mono">{statusLine.nextLabel}</span>
-            </p>
-          ) : null}
+      <HeatmapGuideDialog
+        open={guideOpen}
+        onOpenChange={setGuideOpen}
+        dark={dark}
+        statusLine={statusLine}
+      />
+
+      <header className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+        <div className="glass-value-map-panel px-4 py-2.5">
+          <h1
+            className={cn(
+              "font-[family-name:var(--font-value-map-display)] text-2xl font-semibold tracking-tight sm:text-3xl",
+              "text-value-map-title",
+            )}
+          >
+            MTG Value Map
+          </h1>
         </div>
-        <button
-          type="button"
-          className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-muted-foreground")}
-          onClick={() => setCmdOpen(true)}
+        <nav
+          className="flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:gap-2"
+          aria-label="Shortcuts and pages"
         >
-          ⌘K
-        </button>
+          <Link href="/owned" className="header-toolbar-action">
+            <Library className="size-4 shrink-0 text-amber-200/90" aria-hidden />
+            <span>Owned</span>
+          </Link>
+          <Link href="/watchlist" className="header-toolbar-action">
+            <Bookmark className="size-4 shrink-0 text-amber-200/90" aria-hidden />
+            <span>Wishlist</span>
+          </Link>
+          <button type="button" className="header-toolbar-action cursor-pointer" onClick={() => setGuideOpen(true)}>
+            <Palette className="size-4 shrink-0 text-amber-200/90" aria-hidden />
+            <span>Legend</span>
+          </button>
+          <button type="button" className="header-toolbar-action cursor-pointer" onClick={() => setCmdOpen(true)}>
+            <Search className="size-4 shrink-0 text-amber-200/90" aria-hidden />
+            <span className="inline-flex flex-wrap items-baseline gap-x-1 gap-y-0">
+              <span>Search &amp; commands</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                (<span className="font-mono">{modK}</span>)
+              </span>
+            </span>
+          </button>
+        </nav>
       </header>
 
       <HeatmapFilterBar
@@ -711,10 +739,6 @@ export function HeatmapView() {
         onOpenKeyboardHelp={() => setHelpOpen(true)}
         onPersistNav={persistSessionNav}
       />
-
-      <div className="shrink-0">
-        <Legend dark={dark} />
-      </div>
 
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
         <span>
@@ -748,7 +772,7 @@ export function HeatmapView() {
         </div>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col max-sm:min-h-[40dvh]">
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : error ? (

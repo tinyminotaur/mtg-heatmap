@@ -56,12 +56,15 @@ export type HeatmapFilterColumnsProps = {
   queryString: string;
   onReplaceQuery: (params: URLSearchParams) => void;
   showEmptyColumns: { checked: boolean; onChange: (v: boolean) => void };
+  /** columnFilters = groups/types/sets only; columnSort = order + layout + empty cols */
+  variant?: "full" | "columnFilters" | "columnSort";
 };
 
 export function HeatmapFilterColumns({
   queryString,
   onReplaceQuery,
   showEmptyColumns,
+  variant = "full",
 }: HeatmapFilterColumnsProps) {
   const sp = useMemo(() => new URLSearchParams(queryString), [queryString]);
   const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
@@ -121,8 +124,13 @@ export function HeatmapFilterColumns({
   const typeBadges =
     excludeTypes.length === 0 ? "Show all types" : `${excludeTypes.length} hidden`;
 
+  const showSort = variant === "full" || variant === "columnSort";
+  const showFilters = variant === "full" || variant === "columnFilters";
+
   return (
     <div className="space-y-4">
+      {showSort ? (
+        <>
       <div className="grid gap-4 sm:grid-cols-2">
         <FilterFieldTip tip={HEATMAP_FILTER_TIPS.columnOrder} side="right">
           <div className="cursor-help space-y-1.5">
@@ -177,8 +185,12 @@ export function HeatmapFilterColumns({
           Show empty columns (sets in scope with no matching printing)
         </label>
       </FilterFieldTip>
+        </>
+      ) : null}
 
-      <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+      {showFilters ? (
+        <>
+      <div className={cn("flex flex-wrap gap-2 pt-4", showSort ? "border-t border-border" : "")}>
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
@@ -283,6 +295,8 @@ export function HeatmapFilterColumns({
           ))}
         </div>
       </div>
+        </>
+      ) : null}
     </div>
   );
 }
