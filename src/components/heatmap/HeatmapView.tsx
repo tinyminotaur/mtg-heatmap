@@ -989,7 +989,7 @@ export function HeatmapView() {
             </p>
           </div>
         ) : (
-          <div className="relative min-h-0 min-w-0 flex-1">
+          <div className="relative flex min-h-0 min-w-0 flex-1">
             <HeatmapGrid
               ref={heatmapGridRef}
               columns={columns}
