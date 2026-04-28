@@ -6,6 +6,8 @@ export type FilterGroup = {
 export type PriceCurrency = "usd" | "usd_like" | "usd_foil" | "eur" | "tix";
 export type PriceScope = "any" | "visible";
 export type PriceOp = "gt" | "gte" | "lt" | "lte" | "between";
+export type DateOp = "before" | "after" | "between";
+export type ListOp = "in" | "not_in" | "has_any" | "has_all" | "has_only";
 
 export type FilterRule =
   | { field: "name"; op: "contains"; value: string }
@@ -42,13 +44,15 @@ export type FilterRule =
       scope: PriceScope;
     }
   // Printing-level fields.
-  | { field: "finish"; op: "in" | "not_in"; value: string[] } // foil|nonfoil|etched...
-  | { field: "frame_effect"; op: "in" | "not_in"; value: string[] }
+  | { field: "finish"; op: ListOp; value: string[] } // foil|nonfoil|etched...
+  | { field: "frame_effect"; op: ListOp; value: string[] }
   | { field: "collector_number"; op: "eq" | "contains" | "prefix"; value: string }
   | { field: "promo"; op: "is"; value: boolean }
+  | { field: "set_promo"; op: "is"; value: boolean }
   | { field: "foil_only"; op: "is"; value: boolean }
   | { field: "nonfoil_only"; op: "is"; value: boolean }
   | { field: "digital_set"; op: "is"; value: boolean }
+  | { field: "released_at"; op: DateOp; value: string | [string, string] } // YYYY-MM-DD
   | { field: "owned"; op: "is"; value: boolean }
   | { field: "watchlist"; op: "is"; value: boolean }
   | { field: "pinned"; op: "is"; value: boolean };
@@ -76,6 +80,10 @@ function isString(v: unknown): v is string {
   return typeof v === "string";
 }
 
+function isStringTuple2(v: unknown): v is [string, string] {
+  return Array.isArray(v) && v.length === 2 && typeof v[0] === "string" && typeof v[1] === "string";
+}
+
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
@@ -90,6 +98,18 @@ function isPriceScope(v: unknown): v is PriceScope {
 
 function isPriceOp(v: unknown): v is PriceOp {
   return v === "gt" || v === "gte" || v === "lt" || v === "lte" || v === "between";
+}
+
+function isDateOp(v: unknown): v is DateOp {
+  return v === "before" || v === "after" || v === "between";
+}
+
+function isListOp(v: unknown): v is ListOp {
+  return v === "in" || v === "not_in" || v === "has_any" || v === "has_all" || v === "has_only";
+}
+
+function isIsoDate(v: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
 export function parseAdvancedFiltersFromJson(v: unknown): FilterGroup | null {
@@ -148,14 +168,23 @@ export function parseAdvancedFiltersFromJson(v: unknown): FilterGroup | null {
         });
       }
     }
-    else if (field === "finish" && (rop === "in" || rop === "not_in") && isStringArray(value)) parsed.push({ field, op: rop, value });
-    else if (field === "frame_effect" && (rop === "in" || rop === "not_in") && isStringArray(value)) parsed.push({ field, op: rop, value });
+    else if (field === "finish" && isListOp(rop) && isStringArray(value)) parsed.push({ field, op: rop, value });
+    else if (field === "frame_effect" && isListOp(rop) && isStringArray(value)) parsed.push({ field, op: rop, value });
     else if (field === "collector_number" && (rop === "eq" || rop === "contains" || rop === "prefix") && isString(value))
       parsed.push({ field, op: rop, value });
     else if (field === "promo" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
+    else if (field === "set_promo" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "foil_only" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "nonfoil_only" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "digital_set" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
+    else if (field === "released_at" && isDateOp(rop) && (isString(value) || isStringTuple2(value))) {
+      if (typeof value === "string") {
+        if (isIsoDate(value)) parsed.push({ field, op: rop, value });
+      } else {
+        const [a, b] = value;
+        if (isIsoDate(a) && isIsoDate(b)) parsed.push({ field, op: rop, value });
+      }
+    }
     else if (field === "owned" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "watchlist" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "pinned" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
@@ -439,23 +468,68 @@ export function compileAdvancedFiltersToSql(
       case "finish": {
         const xs = r.value.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
         if (!xs.length) return "";
-        const parts: string[] = [];
-        for (const x of xs) {
-          params.push(`"${x}"`);
-          parts.push(`instr(LOWER(COALESCE(p.finishes, '')), ?) > 0`);
+        if (r.op === "has_only") {
+          const ph = xs.map(() => "?").join(",");
+          params.push(...xs, ...xs);
+          return `EXISTS (
+            SELECT 1 FROM printings p
+            WHERE p.oracle_id = c.oracle_id
+              AND EXISTS (SELECT 1 FROM json_each(COALESCE(p.finishes, '[]')) je_in WHERE LOWER(je_in.value) IN (${ph}))
+              AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(p.finishes, '[]')) je_out WHERE LOWER(je_out.value) NOT IN (${ph}))
+          )`;
         }
-        const inner = `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND (${parts.join(" OR ")}))`;
+        if (r.op === "has_all") {
+          const ph = xs.map(() => "?").join(",");
+          params.push(...xs, xs.length);
+          return `EXISTS (
+            SELECT 1 FROM printings p
+            WHERE p.oracle_id = c.oracle_id
+              AND (SELECT COUNT(DISTINCT LOWER(je.value))
+                   FROM json_each(COALESCE(p.finishes, '[]')) je
+                   WHERE LOWER(je.value) IN (${ph})) = ?
+          )`;
+        }
+        // in / has_any / not_in are "any printing has any of these"
+        const ph = xs.map(() => "?").join(",");
+        params.push(...xs);
+        const inner = `EXISTS (
+          SELECT 1 FROM printings p
+          WHERE p.oracle_id = c.oracle_id
+            AND EXISTS (SELECT 1 FROM json_each(COALESCE(p.finishes, '[]')) je WHERE LOWER(je.value) IN (${ph}))
+        )`;
         return r.op === "not_in" ? `(NOT ${inner})` : inner;
       }
       case "frame_effect": {
         const xs = r.value.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
         if (!xs.length) return "";
-        const parts: string[] = [];
-        for (const x of xs) {
-          params.push(`"${x}"`);
-          parts.push(`instr(LOWER(COALESCE(p.frame_effects, '')), ?) > 0`);
+        if (r.op === "has_only") {
+          const ph = xs.map(() => "?").join(",");
+          params.push(...xs, ...xs);
+          return `EXISTS (
+            SELECT 1 FROM printings p
+            WHERE p.oracle_id = c.oracle_id
+              AND EXISTS (SELECT 1 FROM json_each(COALESCE(p.frame_effects, '[]')) je_in WHERE LOWER(je_in.value) IN (${ph}))
+              AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(p.frame_effects, '[]')) je_out WHERE LOWER(je_out.value) NOT IN (${ph}))
+          )`;
         }
-        const inner = `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND (${parts.join(" OR ")}))`;
+        if (r.op === "has_all") {
+          const ph = xs.map(() => "?").join(",");
+          params.push(...xs, xs.length);
+          return `EXISTS (
+            SELECT 1 FROM printings p
+            WHERE p.oracle_id = c.oracle_id
+              AND (SELECT COUNT(DISTINCT LOWER(je.value))
+                   FROM json_each(COALESCE(p.frame_effects, '[]')) je
+                   WHERE LOWER(je.value) IN (${ph})) = ?
+          )`;
+        }
+        const ph = xs.map(() => "?").join(",");
+        params.push(...xs);
+        const inner = `EXISTS (
+          SELECT 1 FROM printings p
+          WHERE p.oracle_id = c.oracle_id
+            AND EXISTS (SELECT 1 FROM json_each(COALESCE(p.frame_effects, '[]')) je WHERE LOWER(je.value) IN (${ph}))
+        )`;
         return r.op === "not_in" ? `(NOT ${inner})` : inner;
       }
       case "collector_number": {
@@ -475,6 +549,13 @@ export function compileAdvancedFiltersToSql(
       case "promo": {
         return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.is_promo = ${r.value ? 1 : 0})`;
       }
+      case "set_promo": {
+        return `EXISTS (
+          SELECT 1 FROM printings p
+          INNER JOIN sets s ON s.code = p.set_code
+          WHERE p.oracle_id = c.oracle_id AND s.is_promo = ${r.value ? 1 : 0}
+        )`;
+      }
       case "foil_only": {
         return `EXISTS (SELECT 1 FROM printings p WHERE p.oracle_id = c.oracle_id AND p.is_foil_only = ${r.value ? 1 : 0})`;
       }
@@ -486,6 +567,33 @@ export function compileAdvancedFiltersToSql(
           SELECT 1 FROM printings p
           INNER JOIN sets s ON s.code = p.set_code
           WHERE p.oracle_id = c.oracle_id AND s.is_digital = ${r.value ? 1 : 0}
+        )`;
+      }
+      case "released_at": {
+        const col = "COALESCE(p.released_at, s.release_date)";
+        if (r.op === "before" && typeof r.value === "string") {
+          params.push(r.value);
+          return `EXISTS (
+            SELECT 1 FROM printings p INNER JOIN sets s ON s.code = p.set_code
+            WHERE p.oracle_id = c.oracle_id AND ${col} IS NOT NULL AND ${col} < ?
+          )`;
+        }
+        if (r.op === "after" && typeof r.value === "string") {
+          params.push(r.value);
+          return `EXISTS (
+            SELECT 1 FROM printings p INNER JOIN sets s ON s.code = p.set_code
+            WHERE p.oracle_id = c.oracle_id AND ${col} IS NOT NULL AND ${col} > ?
+          )`;
+        }
+        const v = r.value as unknown;
+        if (!Array.isArray(v) || v.length !== 2) return "";
+        const [a0, b0] = v as [string, string];
+        const a = a0 <= b0 ? a0 : b0;
+        const b = a0 <= b0 ? b0 : a0;
+        params.push(a, b);
+        return `EXISTS (
+          SELECT 1 FROM printings p INNER JOIN sets s ON s.code = p.set_code
+          WHERE p.oracle_id = c.oracle_id AND ${col} IS NOT NULL AND ${col} BETWEEN ? AND ?
         )`;
       }
       case "owned":
@@ -522,5 +630,86 @@ export function compileAdvancedFiltersToSql(
 
   const sql = compile(g);
   return { sql, params };
+}
+
+export function normalizeAdvancedFilters(g: FilterGroup): FilterGroup {
+  const isGroupNode = (n: FilterGroup | FilterRule): n is FilterGroup =>
+    typeof (n as Partial<FilterGroup>).op === "string" && Array.isArray((n as Partial<FilterGroup>).rules);
+
+  const normalize = (node: FilterGroup | FilterRule): FilterGroup | FilterRule | null => {
+    if (isGroupNode(node)) {
+      const grp = node;
+      const kids = grp.rules
+        .map(normalize)
+        .filter((x): x is FilterGroup | FilterRule => Boolean(x));
+      if (!kids.length) return null;
+      if (kids.length === 1) return kids[0]!;
+      return { op: grp.op, rules: kids };
+    }
+    const r = node;
+    // Trim string values.
+    if (r.field === "name" || r.field === "oracle_text" || r.field === "type_line") {
+      const v = r.value.trim();
+      if (!v) return null;
+      return { ...r, value: v };
+    }
+    if (r.field === "collector_number") {
+      const v = r.value.trim();
+      if (!v) return null;
+      return { ...r, value: v };
+    }
+    if (r.field === "finish" || r.field === "frame_effect") {
+      const xs = r.value.map((x) => x.trim().toLowerCase()).filter(Boolean);
+      const uniq = [...new Set(xs)].sort();
+      if (!uniq.length) return null;
+      return { ...r, value: uniq };
+    }
+    if (
+      (r.field === "color_identity" ||
+        r.field === "format" ||
+        r.field === "rarity" ||
+        r.field === "set_code" ||
+        r.field === "set_type") &&
+      Array.isArray(r.value)
+    ) {
+      const xs = r.value.map((x) => String(x).trim()).filter(Boolean);
+      const uniq = [...new Set(xs)].sort();
+      if (!uniq.length) return null;
+      return { ...r, value: uniq };
+    }
+    if (r.field === "price" && r.op === "between") {
+      const v = r.value as unknown;
+      if (!Array.isArray(v) || v.length !== 2) return null;
+      const [a0, b0] = v as [number, number];
+      const a = Math.min(a0, b0);
+      const b = Math.max(a0, b0);
+      return { ...r, value: [a, b] };
+    }
+    if (r.field === "cmc" && r.op === "between") {
+      const [a0, b0] = r.value;
+      const a = Math.min(a0, b0);
+      const b = Math.max(a0, b0);
+      return { ...r, value: [a, b] };
+    }
+    if (r.field === "release_year" && r.op === "between") {
+      const [a0, b0] = r.value;
+      const a = Math.min(a0, b0);
+      const b = Math.max(a0, b0);
+      return { ...r, value: [a, b] };
+    }
+    if (r.field === "released_at" && r.op === "between") {
+      const v = r.value as unknown;
+      if (!Array.isArray(v) || v.length !== 2) return null;
+      const [a0, b0] = v as [string, string];
+      const a = a0 <= b0 ? a0 : b0;
+      const b = a0 <= b0 ? b0 : a0;
+      return { ...r, value: [a, b] };
+    }
+    return r;
+  };
+
+  const out = normalize(g);
+  if (!out) return { op: "and", rules: [] };
+  return isGroupNode(out) ? out : { op: "and", rules: [out] };
 }
 

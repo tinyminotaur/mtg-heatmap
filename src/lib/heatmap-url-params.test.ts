@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type HeatmapFilters, defaultHeatmapFilters } from "@/lib/filter-state";
 import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
-import { encodeAdvancedFiltersParam, type FilterGroup } from "@/lib/heatmap/advanced-filters";
+import { encodeAdvancedFiltersParam, normalizeAdvancedFilters, type FilterGroup } from "@/lib/heatmap/advanced-filters";
 
 describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", () => {
   it("round-trips layered year + price (11.14#1 style)", () => {
@@ -154,5 +154,19 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     const out = serializeHeatmapUrlParams(f as HeatmapFilters);
     const again = parseHeatmapUrlSearchParams(out);
     expect(again.advancedFilters).toEqual(g);
+  });
+
+  it("normalizes advanced filters (trims, dedupes, sorts, flattens)", () => {
+    const g: FilterGroup = {
+      op: "and",
+      rules: [
+        { field: "finish", op: "in", value: [" Foil ", "foil", "etched"] },
+        { op: "and", rules: [{ field: "name", op: "contains", value: "  Lotus " }] },
+      ],
+    };
+    const n = normalizeAdvancedFilters(g);
+    expect(n.op).toBe("and");
+    expect(n.rules.length).toBe(2);
+    expect(n.rules[0]).toEqual({ field: "finish", op: "in", value: ["etched", "foil"] });
   });
 });
