@@ -178,7 +178,18 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   const [viewportW, setViewportW] = useState(0);
   const setImagesRef = useRef(new Map<string, HTMLImageElement>());
   const [setIconsEpoch, setSetIconsEpoch] = useState(0);
+  const [manaFontEpoch, setManaFontEpoch] = useState(0);
   const lastHoverWithCellRef = useRef<{ r: number; c: number; cell: CellDTO } | null>(null);
+
+  const gridW = columns.length * HEATMAP_COL_WIDTH;
+  const gridH = rows.length * HEATMAP_ROW_HEIGHT;
+  const effFrozenColW =
+    viewportW > 0 && viewportW < 520
+      ? Math.max(220, Math.floor(viewportW * 0.58))
+      : HEATMAP_FROZEN_COL_W;
+  const effRollupW = viewportW > 0 && viewportW < 520 ? 0 : HEATMAP_FROZEN_ROLLUP_W;
+  const totalW = effFrozenColW + effRollupW + gridW;
+  const totalH = HEATMAP_HEADER_H + gridH;
 
   const setPortEl = useCallback(
     (el: HTMLDivElement | null) => {
@@ -212,7 +223,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         if (row < 0 || col < 0 || row >= rows.length || col >= columns.length) return;
 
         const pad = 12;
-        const cellLeft = HEATMAP_FROZEN_COL_W + col * HEATMAP_COL_WIDTH;
+        const cellLeft = effFrozenColW + effRollupW + col * HEATMAP_COL_WIDTH;
         const cellRight = cellLeft + HEATMAP_COL_WIDTH;
         const cellTop = HEATMAP_HEADER_H + row * HEATMAP_ROW_HEIGHT;
         const cellBottom = cellTop + HEATMAP_ROW_HEIGHT;
@@ -239,14 +250,6 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     }),
     [rows.length, columns.length, onViewportChange, effFrozenColW, effRollupW],
   );
-
-  const gridW = columns.length * HEATMAP_COL_WIDTH;
-  const gridH = rows.length * HEATMAP_ROW_HEIGHT;
-  const effFrozenColW =
-    viewportW > 0 && viewportW < 520 ? Math.max(220, Math.floor(viewportW * 0.58)) : HEATMAP_FROZEN_COL_W;
-  const effRollupW = viewportW > 0 && viewportW < 520 ? 0 : HEATMAP_FROZEN_ROLLUP_W;
-  const totalW = effFrozenColW + effRollupW + gridW;
-  const totalH = HEATMAP_HEADER_H + gridH;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -590,8 +593,30 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.strokeRect(vx + 1, vy + 1, HEATMAP_COL_WIDTH - 2, HEATMAP_ROW_HEIGHT - 2);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- setIconsEpoch bumps draw when set SVGs finish loading (not referenced inside draw)
-  }, [columns, dark, effFrozenColW, effRollupW, gridH, matchMode, priceMode, rows, selectedCol, selectedRow, setIconsEpoch, totalW]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- epochs bump draw when fonts/icons finish loading (not referenced inside draw)
+  }, [columns, dark, effFrozenColW, effRollupW, gridH, matchMode, priceMode, rows, selectedCol, selectedRow, setIconsEpoch, manaFontEpoch, totalW]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadManaFont() {
+      // Canvas text can render tofu boxes until the font is ready; ensure we redraw once it's available.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fonts = (globalThis as any).document?.fonts as FontFaceSet | undefined;
+      if (!fonts?.load) return;
+      try {
+        await fonts.load('15px "Mana"');
+        await fonts.ready;
+      } catch {
+        return;
+      }
+      if (cancelled) return;
+      setManaFontEpoch((n) => n + 1);
+    }
+    void loadManaFont();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
