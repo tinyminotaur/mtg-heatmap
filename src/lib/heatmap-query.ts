@@ -255,7 +255,7 @@ export function getHeatmapData(
 
   const countSql =
     fx.quickPinRows.length > 0
-      ? `SELECT COUNT(*) AS n FROM cards c WHERE ((${cardPred} ${whereTail})) OR ((c.oracle_id IN (${fx.quickPinRows.map(() => "?").join(",")})) ${whereTail}))`
+      ? `SELECT COUNT(*) AS n FROM cards c WHERE (${cardPred} ${whereTail}) OR (c.oracle_id IN (${fx.quickPinRows.map(() => "?").join(",")}) ${whereTail})`
       : `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${whereTail}`;
   const countParams =
     fx.quickPinRows.length > 0
