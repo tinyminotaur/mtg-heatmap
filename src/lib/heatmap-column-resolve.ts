@@ -4,6 +4,56 @@ import type { HeatmapFilters } from "@/lib/filter-state";
 import type { ColumnMeta } from "@/lib/heatmap-types";
 import { expandExcludeGroupTypes } from "@/lib/set-column-groups";
 
+type CacheEntry = { cols: ColumnMeta[]; at: number };
+const COL_CACHE = new Map<string, CacheEntry>();
+const COL_CACHE_MAX = 50;
+const COL_CACHE_TTL_MS = 30_000;
+
+function stableKeyParts(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return `[${v.map(stableKeyParts).join(",")}]`;
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o).sort();
+    return `{${keys.map((k) => `${k}:${stableKeyParts(o[k])}`).join(",")}}`;
+  }
+  return String(v);
+}
+
+function colResolveCacheKey(
+  f: HeatmapFilters,
+  cardPred: string,
+  cardParams: unknown[],
+  havingSql: string,
+  havingParams: unknown[],
+  userId: string,
+): string {
+  const fx = {
+    includeDigital: f.includeDigital,
+    sets: f.sets,
+    yearMin: f.yearMin,
+    yearMax: f.yearMax,
+    hiddenSets: f.hiddenSets,
+    excludeSetTypes: f.excludeSetTypes,
+    excludeGroups: f.excludeGroups,
+    showEmptyColumns: f.showEmptyColumns,
+    showPinned: f.showPinned,
+    quickPinCols: f.quickPinCols ?? [],
+    colSort: f.colSort,
+  };
+  return [
+    "v1",
+    userId,
+    cardPred,
+    stableKeyParts(cardParams),
+    havingSql,
+    stableKeyParts(havingParams),
+    stableKeyParts(fx),
+  ].join("|");
+}
+
 function yearFromDate(d: string | null): number | null {
   if (!d) return null;
   const y = Number(d.slice(0, 4));
@@ -91,6 +141,11 @@ export function resolveHeatmapColumns(
   havingParams: unknown[],
   userId: string,
 ): ColumnMeta[] {
+  const now = Date.now();
+  const key = colResolveCacheKey(f, cardPred, cardParams, havingSql, havingParams, userId);
+  const hit = COL_CACHE.get(key);
+  if (hit && now - hit.at < COL_CACHE_TTL_MS) return hit.cols;
+
   let qualSql = `
     SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
     FROM sets s
@@ -161,5 +216,19 @@ export function resolveHeatmapColumns(
     }
   }
 
-  return sortColumnMeta([...byCode.values()], f.colSort);
+  const cols = sortColumnMeta([...byCode.values()], f.colSort);
+  COL_CACHE.set(key, { cols, at: now });
+  // Cheap LRU-ish eviction: drop oldest when above cap.
+  if (COL_CACHE.size > COL_CACHE_MAX) {
+    let oldestK: string | null = null;
+    let oldestAt = Infinity;
+    for (const [k, v] of COL_CACHE.entries()) {
+      if (v.at < oldestAt) {
+        oldestAt = v.at;
+        oldestK = k;
+      }
+    }
+    if (oldestK) COL_CACHE.delete(oldestK);
+  }
+  return cols;
 }
