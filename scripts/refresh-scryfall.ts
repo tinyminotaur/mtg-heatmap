@@ -34,14 +34,34 @@ function asciiUserAgent(raw: string, maxLen = 256): string {
 function scryfallUserAgent(): string {
   const raw = (process.env.SCRYFALL_USER_AGENT ?? "").trim();
   const ua = raw ? asciiUserAgent(raw) : asciiUserAgent("");
-  for (let i = 0; i < ua.length; i++) {
-    const c = ua.charCodeAt(i);
-    if (c > 127) {
-      throw new Error(
-        `SCRYFALL_USER_AGENT must be ASCII-only (got non-ASCII at index ${i}, U+${c.toString(16)}).`,
-      );
+  // #region agent log
+  {
+    const rawLen = raw.length;
+    const uaLen = ua.length;
+    const rawNonAscii: { i: number; code: number }[] = [];
+    for (let i = 0; i < raw.length && rawNonAscii.length < 10; i++) {
+      const c = raw.charCodeAt(i);
+      if (c > 127) rawNonAscii.push({ i, code: c });
     }
+    const uaNonAscii: { i: number; code: number }[] = [];
+    for (let i = 0; i < ua.length && uaNonAscii.length < 10; i++) {
+      const c = ua.charCodeAt(i);
+      if (c > 127) uaNonAscii.push({ i, code: c });
+    }
+    // No secrets: only lengths + codepoints.
+    console.log(
+      JSON.stringify({
+        tag: "ua_debug",
+        rawLen,
+        uaLen,
+        rawHasNonAscii: rawNonAscii.length > 0,
+        rawNonAscii,
+        uaHasNonAscii: uaNonAscii.length > 0,
+        uaNonAscii,
+      }),
+    );
   }
+  // #endregion
   return ua;
 }
 

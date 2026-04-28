@@ -32,6 +32,14 @@ jobs:
           node-version: "22"
           cache: "pnpm"
 
+      - name: Debug checkout + refresh script fingerprint
+        run: |
+          set -e
+          echo "sha=$(git rev-parse HEAD)"
+          git log -1 --oneline
+          echo "repo=$GITHUB_REPOSITORY ref=$GITHUB_REF"
+          node -e "const fs=require('fs');const t=fs.readFileSync('scripts/refresh-scryfall.ts','utf8');console.log('has_scryfallUserAgent',t.includes('function scryfallUserAgent'));console.log('has_ua_debug',t.includes('tag: \"ua_debug\"')||t.includes('\"ua_debug\"'));console.log('has_api_default',t.includes('api.scryfall.com'));"
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
@@ -44,7 +52,8 @@ jobs:
 
       - name: Bulk refresh (Scryfall default_cards)
         env:
-          SCRYFALL_USER_AGENT: ${{ secrets.SCRYFALL_USER_AGENT }}
+          # Force a known-ASCII UA for debugging (avoids Unicode in secrets/YAML).
+          SCRYFALL_USER_AGENT: mtg-heatmap/1.0 (+https://api.scryfall.com)
         run: pnpm db:refresh
 
       - name: Publish mtg.db to release db-nightly
