@@ -980,6 +980,14 @@ export function HeatmapView() {
               <p className="mt-1 font-mono text-xs text-muted-foreground">{error.message}</p>
             ) : null}
           </div>
+        ) : columns.length === 0 || rows.length === 0 ? (
+          <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Heatmap loaded, but no grid data to render.</p>
+            <p className="mt-1 font-mono text-xs">
+              rows={rows.length} cols={columns.length} loading={String(isLoading)} fetching={String(isFetching)}{" "}
+              qlen={queryString.length}
+            </p>
+          </div>
         ) : (
           <div className="relative min-h-0 min-w-0 flex-1">
             <HeatmapGrid
