@@ -339,15 +339,6 @@ export function HeatmapView() {
     setEditionHeaderHover(null);
   }, [cancelHoverDismiss]);
 
-  const hoverPreviewContains = useCallback((node: EventTarget | Node | null) => {
-    if (!(node instanceof Node)) return false;
-    return Boolean(
-      cardPreviewRef.current?.contains(node) ||
-        nameRowPreviewRef.current?.contains(node) ||
-        editionPreviewRef.current?.contains(node),
-    );
-  }, []);
-
   useEffect(() => {
     return () => cancelHoverDismiss();
   }, [cancelHoverDismiss]);
@@ -1018,8 +1009,6 @@ export function HeatmapView() {
                 setHover({ row: r, col: c, cell, x, y, anchor });
               }}
               onLeaveGrid={clearHoverNow}
-              cardPreviewContainerRef={cardPreviewRef}
-              cardPreviewContains={hoverPreviewContains}
               onViewportChange={bumpPinnedAnchor}
               interactionPortRef={heatmapPortRef}
               onHeaderSetClick={(setCode) => setParam("hcol", setCode)}

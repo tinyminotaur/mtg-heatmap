@@ -67,10 +67,6 @@ type Props = {
     anchor: HeatmapCellAnchorRect,
   ) => void;
   onLeaveGrid: () => void;
-  /** When the pointer leaves the grid toward this element, do not dismiss hover (card preview). */
-  cardPreviewContainerRef?: RefObject<HTMLElement | null>;
-  /** Prefer this when multiple floating preview roots exist (name column, edition header, …). */
-  cardPreviewContains?: (node: EventTarget | Node | null) => boolean;
   /** Fires after scroll/resize redraw so the parent can re-read cell anchors (pinned preview). */
   onViewportChange?: () => void;
   /** Same node as the scroll port (canvas parent); used for “click outside” with pinned preview. */
@@ -184,8 +180,6 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     onSelectCell,
     onHoverCell,
     onLeaveGrid,
-    cardPreviewContainerRef,
-    cardPreviewContains,
     onViewportChange,
     interactionPortRef,
     onHeaderSetClick,
@@ -975,11 +969,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     if (fired) e.preventDefault();
   };
 
-  const onPortMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
-    const next = e.relatedTarget;
-    if (next instanceof Node && cardPreviewContains?.(next)) return;
-    const previewEl = cardPreviewContainerRef?.current;
-    if (previewEl && next instanceof Node && previewEl.contains(next)) return;
+  const onPortMouseLeave = () => {
     onLeaveGrid();
   };
 
