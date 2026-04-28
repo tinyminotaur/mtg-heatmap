@@ -669,17 +669,22 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       const img = new Image();
       img.decoding = "async";
       let triedFallback = false;
+      const usePrimary =
+        Boolean(primary) &&
+        // Avoid spamming 404s when local set icons are not deployed (common in hosted environments).
+        // Prefer Scryfall’s canonical SVGs instead.
+        !primary!.startsWith("/set-icons/");
       img.onload = () => {
         if (cancelled) return;
         setImagesRef.current.set(col.code, img);
         setSetIconsEpoch((n) => n + 1);
       };
       img.onerror = () => {
-        if (cancelled || triedFallback || !primary) return;
+        if (cancelled || triedFallback || !usePrimary) return;
         triedFallback = true;
         img.src = fallback;
       };
-      img.src = primary || fallback;
+      img.src = usePrimary ? primary! : fallback;
     }
     return () => {
       cancelled = true;
