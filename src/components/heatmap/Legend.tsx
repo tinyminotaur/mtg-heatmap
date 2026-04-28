@@ -14,29 +14,24 @@ const tiers = [
 
 export function Legend({ dark }: { dark: boolean }) {
   return (
-    <div className="mb-3 space-y-2">
-      <div className="flex h-3 w-full overflow-hidden rounded-full border border-border">
+    <div className="mb-3 space-y-3 rounded-lg border border-border bg-muted/15 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cell value tiers</p>
+      <div className="flex flex-wrap gap-x-6 gap-y-2.5 text-sm text-foreground">
         {tiers.slice(1).map((t) => (
-          <div
-            key={t.tier}
-            className="flex-1"
-            style={{ backgroundColor: tierToColor(t.tier, dark) }}
-            title={`${t.label}: ${t.range}`}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-        {tiers.slice(1).map((t) => (
-          <span key={t.tier} className="inline-flex items-center gap-1">
+          <span key={t.tier} className="inline-flex items-center gap-2">
             <span
-              className="inline-block h-2 w-2 rounded-sm border border-border/60"
+              className="inline-block size-5 shrink-0 rounded-md border border-border/70 shadow-sm"
               style={{ backgroundColor: tierToColor(t.tier, dark) }}
+              title={`${t.label}: ${t.range}`}
             />
-            {t.label} ({t.range})
+            <span>
+              <span className="font-medium">{t.label}</span>
+              <span className="text-muted-foreground"> · {t.range}</span>
+            </span>
           </span>
         ))}
       </div>
-      <p className="max-w-3xl text-[11px] leading-snug text-muted-foreground">
+      <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
         <span className="font-semibold text-cyan-800 dark:text-cyan-200">Lowest</span> /{" "}
         <span className="font-semibold text-rose-800 dark:text-rose-200">Highest</span> on cells appear only when
         at least two visible columns have a price for that card and the min and max differ (same USD rule as heat

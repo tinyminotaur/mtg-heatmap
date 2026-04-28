@@ -1,11 +1,19 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -17,6 +25,7 @@ import { SetIcon } from "@/components/heatmap/SetIcon";
 import { HEATMAP_FILTER_TIPS } from "@/lib/heatmap-filter-tips";
 import { normalizedColSort } from "@/lib/heatmap-url-params";
 import { FilterFieldTip } from "./FilterFieldTip";
+import { cn } from "@/lib/utils";
 
 type CatalogSet = {
   code: string;
@@ -43,13 +52,18 @@ function toggleListValue(list: string[], value: string): string[] {
   return [...s].sort();
 }
 
-type Props = {
-  searchParamsString: string;
-  setParam: (key: string, value: string | null) => void;
+export type HeatmapFilterColumnsProps = {
+  queryString: string;
+  onReplaceQuery: (params: URLSearchParams) => void;
+  showEmptyColumns: { checked: boolean; onChange: (v: boolean) => void };
 };
 
-export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
-  const sp = useMemo(() => new URLSearchParams(searchParamsString), [searchParamsString]);
+export function HeatmapFilterColumns({
+  queryString,
+  onReplaceQuery,
+  showEmptyColumns,
+}: HeatmapFilterColumnsProps) {
+  const sp = useMemo(() => new URLSearchParams(queryString), [queryString]);
   const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
   const [setSearch, setSetSearch] = useState("");
   const catalogUrl = `/api/sets/catalog?${new URLSearchParams({
@@ -72,15 +86,15 @@ export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
   const hiddenSets = useMemo(() => parseComma(sp, "hideSets"), [sp]);
   const allowSets = useMemo(() => parseComma(sp, "sets"), [sp]);
 
-  const setsByType = useMemo(() => {
-    const m = new Map<string, CatalogSet[]>();
-    for (const s of data?.sets ?? []) {
-      const t = s.set_type ?? "unknown";
-      if (!m.has(t)) m.set(t, []);
-      m.get(t)!.push(s);
-    }
-    return m;
-  }, [data?.sets]);
+  const setParam = useCallback(
+    (key: string, value: string | null) => {
+      const p = new URLSearchParams(queryString);
+      if (value === null || value === "") p.delete(key);
+      else p.set(key, value);
+      onReplaceQuery(p);
+    },
+    [queryString, onReplaceQuery],
+  );
 
   const toggleGroup = (id: string) => {
     const next = toggleListValue(excludeGroups, id);
@@ -102,20 +116,22 @@ export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
     setParam("sets", next.length ? next.join(",") : null);
   };
 
+  const groupBadges =
+    excludeGroups.length === 0 ? "Show all groups" : `${excludeGroups.length} hidden`;
+  const typeBadges =
+    excludeTypes.length === 0 ? "Show all types" : `${excludeTypes.length} hidden`;
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Columns
-        </h3>
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
         <FilterFieldTip tip={HEATMAP_FILTER_TIPS.columnOrder} side="right">
-          <div className="cursor-help space-y-2">
-            <Label>Column order</Label>
+          <div className="cursor-help space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Column order</Label>
             <Select
               value={colSortSelectValue}
               onValueChange={(v) => setParam("colSort", v === "release" ? null : v)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="h-8 w-full text-xs">
                 <SelectValue placeholder="Order" />
               </SelectTrigger>
               <SelectContent>
@@ -128,6 +144,7 @@ export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
             </Select>
           </div>
         </FilterFieldTip>
+
         <FilterFieldTip
           tip={
             sp.get("hlay") === "value"
@@ -136,87 +153,105 @@ export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
           }
           side="right"
         >
-          <div className="mt-4 cursor-help space-y-2">
-            <Label>Heatmap columns</Label>
+          <div className="cursor-help space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Heatmap columns</Label>
             <Select
               value={sp.get("hlay") === "value" ? "value" : "sets"}
               onValueChange={(v) => setParam("hlay", v === "value" ? "value" : null)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="h-8 w-full text-xs">
                 <SelectValue placeholder="Layout" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="sets">One column per set</SelectItem>
-                <SelectItem value="value">Min, median, and max (one column each)</SelectItem>
+                <SelectItem value="value">Min / median / max columns</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </FilterFieldTip>
       </div>
 
-      <Separator />
+      <FilterFieldTip tip={HEATMAP_FILTER_TIPS.showEmptyColumns}>
+        <label className="flex cursor-help items-center gap-2 text-xs">
+          <Checkbox checked={showEmptyColumns.checked} onCheckedChange={(v) => showEmptyColumns.onChange(Boolean(v))} />
+          Show empty columns (sets in scope with no matching printing)
+        </label>
+      </FilterFieldTip>
 
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Hide column groups
-        </h3>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Whole groups remove every set of those types from the heatmap columns (not row filters).
-        </p>
-        <div className="space-y-3">
-          {(data?.groups ?? []).map((g) => (
-            <label key={g.id} className="flex cursor-pointer gap-2 rounded-md border border-border/60 bg-muted/30 p-2">
-              <Checkbox
+      <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              "h-8 max-w-full shrink text-xs",
+            )}
+          >
+            Column groups · {groupBadges}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="max-h-[min(70vh,28rem)] w-[min(calc(100vw-2rem),22rem)] overflow-y-auto p-1" align="start">
+            <DropdownMenuLabel className="text-xs leading-snug font-normal text-muted-foreground">
+              Exclude whole release groups from column list (not row filters).
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {(data?.groups ?? []).map((g) => (
+              <DropdownMenuCheckboxItem
+                key={g.id}
                 checked={excludeGroups.includes(g.id)}
                 onCheckedChange={() => toggleGroup(g.id)}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="font-medium">{g.label}</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">{g.description}</span>
-              </span>
-            </label>
-          ))}
-        </div>
+              >
+                <span className="flex flex-col gap-0.5">
+                  <span>{g.label}</span>
+                  <span className="text-[11px] font-normal text-muted-foreground">{g.description}</span>
+                </span>
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              "h-8 max-w-full shrink text-xs",
+            )}
+          >
+            Set types · {typeBadges}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="max-h-[min(70vh,28rem)] w-56 overflow-y-auto" align="start">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              Exclude columns by Scryfall set_type
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {isLoading ? (
+              <p className="px-2 py-2 text-xs text-muted-foreground">Loading…</p>
+            ) : (
+              (data?.setTypes ?? []).map((t) => (
+                <DropdownMenuCheckboxItem
+                  key={t}
+                  checked={excludeTypes.includes(t)}
+                  onCheckedChange={() => toggleType(t)}
+                  className="font-mono text-xs"
+                >
+                  {t}
+                </DropdownMenuCheckboxItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      <Separator />
-
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Hide by set type
-        </h3>
-        {isLoading ? <p className="text-xs text-muted-foreground">Loading set types…</p> : null}
-        <div className="flex flex-wrap gap-2">
-          {(data?.setTypes ?? []).map((t) => (
-            <label
-              key={t}
-              className="flex items-center gap-1.5 rounded-md border border-border/50 bg-background px-2 py-1"
-            >
-              <Checkbox checked={excludeTypes.includes(t)} onCheckedChange={() => toggleType(t)} />
-              <span className="font-mono text-xs">{t}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <Separator />
-
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Sets (search + icons)
-        </h3>
-        <p className="mb-2 text-xs text-muted-foreground">
-          <strong>Hide column</strong> removes that set from columns.{" "}
-          <strong>Only these</strong> is an allowlist (only checked sets show as columns).
+      <div className="border-t border-border pt-4">
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Sets · search &amp; per-column</p>
+        <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+          <strong>Hide</strong> removes that edition from columns. <strong>Only</strong> is an allowlist (checked sets only).
         </p>
         <Input
           value={setSearch}
           onChange={(e) => setSetSearch(e.target.value)}
           placeholder="Filter sets by name or code…"
-          className="mb-3"
+          className="mb-3 h-8 text-sm"
         />
-        <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+        <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2 md:max-h-64">
           {(data?.sets ?? []).map((s) => (
             <div
               key={s.code}
@@ -245,48 +280,6 @@ export function HeatmapFilterColumns({ searchParamsString, setParam }: Props) {
                 only
               </label>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <Separator />
-
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          By set type (expand)
-        </h3>
-        <div className="space-y-1">
-          {Array.from(setsByType.keys())
-            .sort()
-            .map((t) => (
-            <details
-              key={t}
-              className="rounded-md border border-border/60 open:[&>summary>span:first-child]:rotate-90"
-            >
-              <summary className="cursor-pointer list-none px-2 py-1.5 text-xs font-medium marker:hidden [&::-webkit-details-marker]:hidden">
-                <span className="mr-1 inline-block text-muted-foreground transition-transform">▸</span>
-                <span className="font-mono">{t}</span>
-                <span className="ml-1 text-muted-foreground">({setsByType.get(t)?.length ?? 0})</span>
-              </summary>
-              <div className="border-t border-border/40 px-2 py-2">
-                <label className="mb-2 flex items-center gap-2 text-xs">
-                  <Checkbox checked={excludeTypes.includes(t)} onCheckedChange={() => toggleType(t)} />
-                  Hide all columns of this type
-                </label>
-                <div className="max-h-40 space-y-1 overflow-y-auto">
-                  {(setsByType.get(t) ?? []).map((s) => (
-                    <div key={s.code} className="flex items-center gap-2 text-xs">
-                      <SetIcon code={s.code} iconPath={s.icon_svg_path} size={16} />
-                      <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                      <Checkbox
-                        checked={hiddenSets.includes(s.code)}
-                        onCheckedChange={() => toggleHideSet(s.code)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </details>
           ))}
         </div>
       </div>
