@@ -29,6 +29,8 @@ import type { ColumnMeta } from "@/lib/heatmap-query";
 import type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
 import { defaultHeatmapFilters, slotsToPrimarySortString } from "@/lib/filter-state";
 import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
+import type { SortingState, VisibilityState } from "@tanstack/react-table";
+import { heatmapFiltersToTanStackState } from "@/lib/heatmap/tanstack-adapter";
 import {
   deleteSavedView,
   duplicateSavedView,
@@ -41,15 +43,22 @@ import { HEATMAP_FILTER_TIPS } from "@/lib/heatmap-filter-tips";
 import { cn } from "@/lib/utils";
 import { HeatmapFilterColumns } from "./HeatmapFilterColumns";
 import { FilterFieldTip } from "./FilterFieldTip";
+import { useQuery } from "@tanstack/react-query";
 
 export type ViewSessionMeta = { activeViewId: string | null; snapshotQuery: string | null };
 
 const RARITIES = ["common", "uncommon", "rare", "mythic", "special", "bonus"] as const;
+const COLOR_IDENTITY = ["W", "U", "B", "R", "G", "C"] as const;
 
 type Props = {
   queryString: string;
   columns: ColumnMeta[];
   onReplaceQuery: (params: URLSearchParams) => void;
+  /** Optional: drive sorting through TanStack state instead of local URL patching. */
+  onSortingChange?: (sorting: SortingState) => void;
+  /** Optional: drive column visibility through TanStack state. */
+  columnVisibility?: VisibilityState;
+  onColumnVisibilityChange?: (visibility: VisibilityState) => void;
   activeViewId: string | null;
   snapshotQuery: string | null;
   onViewSessionChange: (m: ViewSessionMeta) => void;
@@ -86,6 +95,9 @@ export function HeatmapFilterBar({
   queryString,
   columns,
   onReplaceQuery,
+  onSortingChange,
+  columnVisibility,
+  onColumnVisibilityChange,
   activeViewId,
   snapshotQuery,
   onViewSessionChange,
@@ -101,6 +113,28 @@ export function HeatmapFilterBar({
 }: Props) {
   const router = useRouter();
   const f = useMemo(() => filtersFromQuery(queryString), [queryString]);
+
+  const facetsUrl = useMemo(() => `/api/heatmap/facets?${queryString}`, [queryString]);
+  const { data: facets } = useQuery<{
+    total: number;
+    rarity: { key: string; n: number }[];
+    colorIdentity: { key: string; n: number }[];
+    rowScope: { owned: number; watchlist: number; pinned: number; reserved: number };
+    formats: { key: string; n: number }[];
+    types: { key: string; n: number }[];
+    topSets: { code: string; name: string; n: number }[];
+    cmc: { min: number | null; max: number | null };
+    priceUsdLike: { min: number | null; max: number | null };
+    year: { min: number | null; max: number | null };
+  }>({
+    queryKey: ["heatmap-facets", facetsUrl],
+    queryFn: async () => {
+      const res = await fetch(facetsUrl);
+      if (!res.ok) throw new Error("facets");
+      return res.json();
+    },
+    staleTime: 15_000,
+  });
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [newName, setNewName] = useState("");
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -191,6 +225,12 @@ export function HeatmapFilterBar({
   const setSortSlots = (slots: SortSlot[]) => {
     const next = slots.slice(0, 3);
     const resolved: SortSlot[] = next.length ? next : [{ key: "name", dir: null }];
+    if (onSortingChange) {
+      // Let the parent (HeatmapView) serialize sorting into URL params via adapter.
+      const sorting = heatmapFiltersToTanStackState({ ...f, sortSlots: resolved }).sorting;
+      onSortingChange(sorting);
+      return;
+    }
     patch((b) => ({
       ...b,
       sortSlots: resolved,
@@ -202,6 +242,33 @@ export function HeatmapFilterBar({
 
   const raritySummary =
     f.rarity.length === 0 ? "Any rarity" : `${f.rarity.length} rarity type${f.rarity.length === 1 ? "" : "s"}`;
+
+  const rarityCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of facets?.rarity ?? []) m.set(r.key, r.n);
+    return m;
+  }, [facets]);
+
+  const colorCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of facets?.colorIdentity ?? []) m.set(r.key, r.n);
+    return m;
+  }, [facets]);
+
+  const facetSummary = useMemo(() => {
+    if (!facets) return null;
+    const year =
+      facets.year.min != null && facets.year.max != null ? `${facets.year.min}–${facets.year.max}` : null;
+    const cmc =
+      facets.cmc.min != null && facets.cmc.max != null
+        ? `${facets.cmc.min.toLocaleString(undefined, { maximumFractionDigits: 1 })}–${facets.cmc.max.toLocaleString(undefined, { maximumFractionDigits: 1 })}`
+        : null;
+    const price =
+      facets.priceUsdLike.min != null && facets.priceUsdLike.max != null
+        ? `$${facets.priceUsdLike.min.toFixed(2)}–$${facets.priceUsdLike.max.toFixed(2)}`
+        : null;
+    return { year, cmc, price };
+  }, [facets]);
 
   const rowOptionsCount = useMemo(() => {
     let n = 0;
@@ -221,6 +288,33 @@ export function HeatmapFilterBar({
       if (s.has(r)) s.delete(r);
       else s.add(r);
       return { ...b, rarity: [...s].sort() };
+    });
+  };
+
+  const toggleColorIdentity = (c: string) => {
+    patch((b) => {
+      const s = new Set(b.colors);
+      if (s.has(c)) s.delete(c);
+      else s.add(c);
+      return { ...b, colors: [...s].sort() };
+    });
+  };
+
+  const toggleFormat = (fmt: string) => {
+    patch((b) => {
+      const s = new Set(b.formats);
+      if (s.has(fmt)) s.delete(fmt);
+      else s.add(fmt);
+      return { ...b, formats: [...s].sort() };
+    });
+  };
+
+  const toggleType = (t: string) => {
+    patch((b) => {
+      const s = new Set(b.types);
+      if (s.has(t)) s.delete(t);
+      else s.add(t);
+      return { ...b, types: [...s].sort() };
     });
   };
 
@@ -428,6 +522,13 @@ export function HeatmapFilterBar({
 
       {filtersRootOpen ? (
         <div className="max-h-[min(58dvh,520px)] overflow-y-auto border-t border-border px-2 pb-3 pt-2 sm:max-h-[min(70dvh,720px)] sm:px-3">
+          {facetSummary ? (
+            <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+              {facetSummary.year ? <Badge variant="secondary">Year: {facetSummary.year}</Badge> : null}
+              {facetSummary.cmc ? <Badge variant="secondary">CMC: {facetSummary.cmc}</Badge> : null}
+              {facetSummary.price ? <Badge variant="secondary">Price: {facetSummary.price}</Badge> : null}
+            </div>
+          ) : null}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             {/* Rows */}
             <section className="rounded-lg border border-border bg-muted/10 p-3">
@@ -579,7 +680,111 @@ export function HeatmapFilterBar({
                               onCheckedChange={() => toggleRarity(r)}
                               className="capitalize"
                             >
-                              {r}
+                              <span className="flex w-full items-center justify-between gap-2">
+                                <span>{r}</span>
+                                {rarityCounts.has(r) ? (
+                                  <span className="font-mono text-[10px] text-muted-foreground">
+                                    {rarityCounts.get(r)!.toLocaleString()}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </DropdownMenuCheckboxItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
+                      >
+                        Color ID:{" "}
+                        {f.colors.length
+                          ? f.colors.join("")
+                          : colorCounts.has("(none)")
+                            ? `Any (colorless ${colorCounts.get("(none)")!.toLocaleString()})`
+                            : "Any"}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-56" align="start">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-xs">Color identity (multi)</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {COLOR_IDENTITY.map((c) => (
+                            <DropdownMenuCheckboxItem
+                              key={c}
+                              checked={f.colors.includes(c)}
+                              onCheckedChange={() => toggleColorIdentity(c)}
+                              className="font-mono"
+                            >
+                              <span className="flex w-full items-center justify-between gap-2">
+                                <span>{c === "C" ? "Colorless" : c}</span>
+                                {c === "C" ? (
+                                  colorCounts.has("(none)") ? (
+                                    <span className="font-mono text-[10px] text-muted-foreground">
+                                      {colorCounts.get("(none)")!.toLocaleString()}
+                                    </span>
+                                  ) : null
+                                ) : colorCounts.has(c) ? (
+                                  <span className="font-mono text-[10px] text-muted-foreground">
+                                    {colorCounts.get(c)!.toLocaleString()}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </DropdownMenuCheckboxItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
+                      >
+                        Formats{f.formats.length ? ` (${f.formats.length})` : ""}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64" align="start">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-xs">Formats (multi)</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {(facets?.formats ?? []).map((fmt) => (
+                            <DropdownMenuCheckboxItem
+                              key={fmt.key}
+                              checked={f.formats.includes(fmt.key)}
+                              onCheckedChange={() => toggleFormat(fmt.key)}
+                              className="font-mono"
+                            >
+                              <span className="flex w-full items-center justify-between gap-2">
+                                <span>{fmt.key}</span>
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {fmt.n.toLocaleString()}
+                                </span>
+                              </span>
+                            </DropdownMenuCheckboxItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
+                      >
+                        Types{f.types.length ? ` (${f.types.length})` : ""}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-72" align="start">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-xs">Type prefixes (multi)</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {(facets?.types ?? []).map((t) => (
+                            <DropdownMenuCheckboxItem
+                              key={t.key}
+                              checked={f.types.includes(t.key)}
+                              onCheckedChange={() => toggleType(t.key)}
+                              className="font-mono"
+                            >
+                              <span className="flex w-full items-center justify-between gap-2">
+                                <span className="truncate">{t.key}</span>
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {t.n.toLocaleString()}
+                                </span>
+                              </span>
                             </DropdownMenuCheckboxItem>
                           ))}
                         </DropdownMenuGroup>
@@ -605,25 +810,53 @@ export function HeatmapFilterBar({
                             checked={Boolean(f.reservedOnly)}
                             onCheckedChange={(v) => patch((b) => ({ ...b, reservedOnly: v ? true : null }))}
                           >
-                            Reserved List only
+                            <span className="flex w-full items-center justify-between gap-2">
+                              <span>Reserved List only</span>
+                              {facets?.rowScope ? (
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {facets.rowScope.reserved.toLocaleString()}
+                                </span>
+                              ) : null}
+                            </span>
                           </DropdownMenuCheckboxItem>
                           <DropdownMenuCheckboxItem
                             checked={f.owned === true}
                             onCheckedChange={(v) => patch((b) => ({ ...b, owned: v ? true : null }))}
                           >
-                            Owned only
+                            <span className="flex w-full items-center justify-between gap-2">
+                              <span>Owned only</span>
+                              {facets?.rowScope ? (
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {facets.rowScope.owned.toLocaleString()}
+                                </span>
+                              ) : null}
+                            </span>
                           </DropdownMenuCheckboxItem>
                           <DropdownMenuCheckboxItem
                             checked={f.watchlist === true}
                             onCheckedChange={(v) => patch((b) => ({ ...b, watchlist: v ? true : null }))}
                           >
-                            Watchlist only
+                            <span className="flex w-full items-center justify-between gap-2">
+                              <span>Watchlist only</span>
+                              {facets?.rowScope ? (
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {facets.rowScope.watchlist.toLocaleString()}
+                                </span>
+                              ) : null}
+                            </span>
                           </DropdownMenuCheckboxItem>
                           <DropdownMenuCheckboxItem
                             checked={f.pinned === true}
                             onCheckedChange={(v) => patch((b) => ({ ...b, pinned: v ? true : null }))}
                           >
-                            Pinned only
+                            <span className="flex w-full items-center justify-between gap-2">
+                              <span>Pinned only</span>
+                              {facets?.rowScope ? (
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {facets.rowScope.pinned.toLocaleString()}
+                                </span>
+                              ) : null}
+                            </span>
                           </DropdownMenuCheckboxItem>
                         </DropdownMenuGroup>
                       </DropdownMenuContent>
@@ -821,6 +1054,10 @@ export function HeatmapFilterBar({
                     queryString={queryString}
                     onReplaceQuery={onReplaceQuery}
                     showEmptyColumns={showEmptyPatch}
+                    currentColumns={columns}
+                    columnVisibility={columnVisibility}
+                    onColumnVisibilityChange={onColumnVisibilityChange}
+                    topSets={facets?.topSets ?? []}
                   />
                 </div>
                 <div className="rounded-md border border-border/70 bg-background/40 p-3">
@@ -830,6 +1067,10 @@ export function HeatmapFilterBar({
                     queryString={queryString}
                     onReplaceQuery={onReplaceQuery}
                     showEmptyColumns={showEmptyPatch}
+                    currentColumns={columns}
+                    columnVisibility={columnVisibility}
+                    onColumnVisibilityChange={onColumnVisibilityChange}
+                    topSets={facets?.topSets ?? []}
                   />
                 </div>
               </div>

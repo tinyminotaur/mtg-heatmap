@@ -27,6 +27,7 @@ import { HEATMAP_FILTER_TIPS } from "@/lib/heatmap-filter-tips";
 import { normalizedColSort } from "@/lib/heatmap-url-params";
 import { FilterFieldTip } from "./FilterFieldTip";
 import { cn } from "@/lib/utils";
+import type { VisibilityState } from "@tanstack/react-table";
 
 type CatalogSet = {
   code: string;
@@ -59,6 +60,11 @@ export type HeatmapFilterColumnsProps = {
   showEmptyColumns: { checked: boolean; onChange: (v: boolean) => void };
   /** columnFilters = groups/types/sets only; columnSort = order + layout + empty cols */
   variant?: "full" | "columnFilters" | "columnSort";
+  /** Current resolved heatmap columns (from `/api/heatmap`), for a quick “visibility” toggle list. */
+  currentColumns?: CatalogSet[];
+  columnVisibility?: VisibilityState;
+  onColumnVisibilityChange?: (visibility: VisibilityState) => void;
+  topSets?: { code: string; name: string; n: number }[];
 };
 
 export function HeatmapFilterColumns({
@@ -66,6 +72,10 @@ export function HeatmapFilterColumns({
   onReplaceQuery,
   showEmptyColumns,
   variant = "full",
+  currentColumns,
+  columnVisibility,
+  onColumnVisibilityChange,
+  topSets,
 }: HeatmapFilterColumnsProps) {
   const sp = useMemo(() => new URLSearchParams(queryString), [queryString]);
   const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
@@ -89,6 +99,7 @@ export function HeatmapFilterColumns({
   const excludeTypes = useMemo(() => parseComma(sp, "exclTypes"), [sp]);
   const hiddenSets = useMemo(() => parseComma(sp, "hideSets"), [sp]);
   const allowSets = useMemo(() => parseComma(sp, "sets"), [sp]);
+  const quickPinCols = useMemo(() => parseComma(sp, "qc").map((x) => x.trim().toLowerCase()).filter(Boolean), [sp]);
 
   const setParam = useCallback(
     (key: string, value: string | null) => {
@@ -120,6 +131,13 @@ export function HeatmapFilterColumns({
     setParam("sets", next.length ? next.join(",") : null);
   };
 
+  const toggleQuickPinCol = (code: string) => {
+    const c = code.trim().toLowerCase();
+    if (!c) return;
+    const next = toggleListValue(quickPinCols, c);
+    setParam("qc", next.length ? next.join(",") : null);
+  };
+
   const groupBadges =
     excludeGroups.length === 0 ? "Show all groups" : `${excludeGroups.length} hidden`;
   const typeBadges =
@@ -127,6 +145,16 @@ export function HeatmapFilterColumns({
 
   const showSort = variant === "full" || variant === "columnSort";
   const showFilters = variant === "full" || variant === "columnFilters";
+  const canToggleVisibility = Boolean(currentColumns && columnVisibility && onColumnVisibilityChange);
+  const showTopSets = showFilters && (topSets?.length ?? 0) > 0;
+
+  const toggleVisibleColumn = (code: string) => {
+    if (!canToggleVisibility) return;
+    const id = `set:${code}`;
+    const cur = columnVisibility![id];
+    const next: VisibilityState = { ...columnVisibility, [id]: !(cur !== false) };
+    onColumnVisibilityChange!(next);
+  };
 
   return (
     <div className="space-y-4">
@@ -191,6 +219,79 @@ export function HeatmapFilterColumns({
 
       {showFilters ? (
         <>
+      {canToggleVisibility ? (
+        <div className={cn("space-y-2", showSort ? "border-t border-border pt-4" : "")}>
+          <p className="text-xs font-medium text-muted-foreground">Current columns · show/hide</p>
+          <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+            {(currentColumns ?? [])
+              .filter((c) => c.set_type !== "aggregate" && !c.code.startsWith("__"))
+              .map((c) => {
+                const id = `set:${c.code}`;
+                const visible = (columnVisibility?.[id] ?? true) !== false;
+                return (
+                  <label
+                    key={c.code}
+                    className="flex cursor-pointer items-center justify-between gap-2 rounded-sm px-1 py-0.5 hover:bg-muted/50"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[11px]">
+                      <span className="font-mono">{c.code.toUpperCase()}</span> · {c.name}
+                    </span>
+                    <Checkbox checked={visible} onCheckedChange={() => toggleVisibleColumn(c.code)} />
+                  </label>
+                );
+              })}
+          </div>
+          <p className="text-[10px] leading-snug text-muted-foreground">
+            This toggles visibility via URL params (server-side columns). If you’re in “only these sets” mode, toggles update that allowlist.
+          </p>
+        </div>
+      ) : null}
+
+      {showTopSets ? (
+        <div className={cn("space-y-2", showSort ? "border-t border-border pt-4" : "")}>
+          <p className="text-xs font-medium text-muted-foreground">Top sets in results</p>
+          <div className="space-y-1 rounded-md border border-border p-2">
+            {(topSets ?? []).slice(0, 10).map((s) => (
+              <div key={s.code} className="flex items-center gap-2 rounded-sm px-1 py-1 hover:bg-muted/40">
+                <SetIcon code={s.code} iconPath={null} size={18} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium leading-tight">{s.name}</div>
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    {s.code} · {s.n.toLocaleString()}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-[10px]")}
+                  onClick={() => toggleHideSet(s.code)}
+                >
+                  hide
+                </button>
+                <button
+                  type="button"
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-[10px]")}
+                  onClick={() => toggleAllowSet(s.code)}
+                >
+                  only
+                </button>
+                <button
+                  type="button"
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-[10px]")}
+                  onClick={() => toggleQuickPinCol(s.code)}
+                  aria-pressed={quickPinCols.includes(s.code.toLowerCase())}
+                >
+                  qc
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] leading-snug text-muted-foreground">
+            Actions update URL params: <span className="font-mono">hideSets</span>, <span className="font-mono">sets</span>,{" "}
+            <span className="font-mono">qc</span>.
+          </p>
+        </div>
+      ) : null}
+
       <div className={cn("flex flex-wrap gap-2 pt-4", showSort ? "border-t border-border" : "")}>
         <DropdownMenu>
           <DropdownMenuTrigger

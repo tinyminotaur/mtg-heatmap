@@ -14,7 +14,16 @@ import { readHeatmapSession, writeHeatmapSession } from "@/lib/heatmap-session";
 import { formatPriceKind, getHeatmapPriceRange } from "@/lib/heatmap-best-deal";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
 import { cellEligibleForHeatmapHoverPreview, type PriceMode } from "@/lib/price-scale";
-import { parseHeatmapCellPriceField, parseHeatmapUrlSearchParams } from "@/lib/heatmap-url-params";
+import {
+  parseHeatmapCellPriceField,
+  parseHeatmapUrlSearchParams,
+  serializeHeatmapUrlParams,
+} from "@/lib/heatmap-url-params";
+import {
+  applyColumnVisibilityToHeatmapFilters,
+  heatmapFiltersToColumnVisibility,
+  tanStackStateToHeatmapFilters,
+} from "@/lib/heatmap/tanstack-adapter";
 import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
 import { HeatmapFilterBar, type ViewSessionMeta } from "./HeatmapFilterBar";
 import { HeatmapGrid, type HeatmapCellAnchorRect, type HeatmapGridHandle } from "./HeatmapGrid";
@@ -22,6 +31,7 @@ import { HeatmapGuideDialog } from "./HeatmapGuideDialog";
 import { OwnedListPanel } from "@/components/owned/OwnedListPanel";
 import { WatchlistListPanel } from "@/components/watchlist/WatchlistListPanel";
 import { Bookmark, Library, Maximize2, Palette, Search, X } from "lucide-react";
+import type { SortingState, VisibilityState } from "@tanstack/react-table";
 
 /** Toggle `qr=` / `qc=` comma lists in the URL (session quick-pins). */
 function patchCommaSearchParam(sp: ReadonlyURLSearchParams, key: "qr" | "qc", token: string): URLSearchParams {
@@ -250,6 +260,7 @@ export function HeatmapView() {
   }, []);
 
   const queryString = useMemo(() => sp.toString(), [sp]);
+  const urlFilters = useMemo(() => parseHeatmapUrlSearchParams(sp), [sp]);
 
   const { data, isLoading, error } = useQuery<HeatmapResponse>({
     queryKey: ["heatmap", queryString],
@@ -349,10 +360,7 @@ export function HeatmapView() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [ownedOverlayOpen, setOwnedOverlayOpen] = useState(false);
   const [wishlistOverlayOpen, setWishlistOverlayOpen] = useState(false);
-  const [modK, setModK] = useState("⌘K / Ctrl+K");
-  useEffect(() => {
-    setModK(/mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘K" : "Ctrl+K");
-  }, []);
+  const [modK] = useState(() => (/mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘K" : "Ctrl+K"));
   const goPending = useRef(false);
   const goTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -391,6 +399,27 @@ export function HeatmapView() {
       router.replace(`/?${p.toString()}`);
     },
     [router],
+  );
+
+  const onSortingChange = useCallback(
+    (nextSorting: SortingState) => {
+      const nextFilters = tanStackStateToHeatmapFilters({ sorting: nextSorting }, urlFilters);
+      replaceQuery(serializeHeatmapUrlParams(nextFilters));
+    },
+    [replaceQuery, urlFilters],
+  );
+
+  const columnVisibility = useMemo(
+    () => heatmapFiltersToColumnVisibility(urlFilters, columns),
+    [urlFilters, columns],
+  );
+
+  const onColumnVisibilityChange = useCallback(
+    (nextVisibility: VisibilityState) => {
+      const nextFilters = applyColumnVisibilityToHeatmapFilters(urlFilters, columns, nextVisibility);
+      replaceQuery(serializeHeatmapUrlParams(nextFilters));
+    },
+    [replaceQuery, urlFilters, columns],
   );
 
   useEffect(() => {
@@ -890,6 +919,9 @@ export function HeatmapView() {
         queryString={queryString}
         columns={columns}
         onReplaceQuery={replaceQuery}
+        onSortingChange={onSortingChange}
+        columnVisibility={columnVisibility}
+        onColumnVisibilityChange={onColumnVisibilityChange}
         activeViewId={viewSession.activeViewId}
         snapshotQuery={viewSession.snapshotQuery}
         onViewSessionChange={setViewSession}

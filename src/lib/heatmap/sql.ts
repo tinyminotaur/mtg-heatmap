@@ -46,8 +46,13 @@ export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unkno
   }
   if (f.colors.length) {
     for (const col of f.colors) {
-      parts.push(`instr(COALESCE(c.color_identity, c.colors, ''), ?) > 0`);
-      params.push(`"${col}"`);
+      if (col === "C") {
+        // “Colorless”: no color identity entries (treat null/empty as colorless).
+        parts.push(`(c.color_identity IS NULL OR c.color_identity = '[]' OR TRIM(c.color_identity) = '')`);
+      } else {
+        parts.push(`instr(COALESCE(c.color_identity, c.colors, ''), ?) > 0`);
+        params.push(`"${col}"`);
+      }
     }
   }
   if (f.types.length) {
