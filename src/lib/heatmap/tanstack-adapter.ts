@@ -5,7 +5,7 @@ import type { ColumnMeta } from "@/lib/heatmap-types";
 
 export type HeatmapTanStackState = {
   sorting: SortingState;
-  columnVisibility: VisibilityState;
+  columnVisibility?: VisibilityState;
 };
 
 function sortSlotToColumnId(slot: SortSlot["key"]): string {
@@ -56,7 +56,7 @@ export function heatmapFiltersToTanStackState(f: HeatmapFilters): HeatmapTanStac
 }
 
 export function tanStackStateToHeatmapFilters(
-  state: HeatmapTanStackState,
+  state: Pick<HeatmapTanStackState, "sorting">,
   base: HeatmapFilters,
 ): HeatmapFilters {
   const sortSlots = sortingStateToSortSlots(state.sorting ?? []);
