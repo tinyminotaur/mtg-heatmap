@@ -11,6 +11,31 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+function withFacetCleared(
+  f: HeatmapFilters,
+  facet:
+    | "rarity"
+    | "colors"
+    | "formats"
+    | "types"
+    | "rowScope",
+): HeatmapFilters {
+  switch (facet) {
+    case "rarity":
+      return { ...f, rarity: [] };
+    case "colors":
+      return { ...f, colors: [] };
+    case "formats":
+      return { ...f, formats: [] };
+    case "types":
+      return { ...f, types: [] };
+    case "rowScope":
+      return { ...f, owned: null, watchlist: null, pinned: null, reservedOnly: null };
+    default:
+      return f;
+  }
+}
+
 type FacetsResponse = {
   total: number;
   rarity: { key: string; n: number }[];
@@ -74,6 +99,11 @@ export async function GET(req: NextRequest) {
     const physicalSetCodes = physicalColumns.map((c) => c.code);
 
     const base = baseCardWhere(fx, physicalSetCodes);
+    const baseForRarity = baseCardWhere(withFacetCleared(fx, "rarity"), physicalSetCodes);
+    const baseForColors = baseCardWhere(withFacetCleared(fx, "colors"), physicalSetCodes);
+    const baseForFormats = baseCardWhere(withFacetCleared(fx, "formats"), physicalSetCodes);
+    const baseForTypes = baseCardWhere(withFacetCleared(fx, "types"), physicalSetCodes);
+    const baseForRowScope = baseCardWhere(withFacetCleared(fx, "rowScope"), physicalSetCodes);
 
     const totalRow = db
       .prepare(`SELECT COUNT(*) AS n FROM cards c WHERE ${base.sql}`)
@@ -85,12 +115,12 @@ export async function GET(req: NextRequest) {
         SELECT COALESCE(p.rarity, '(unknown)') AS k, COUNT(DISTINCT c.oracle_id) AS n
         FROM cards c
         INNER JOIN printings p ON p.oracle_id = c.oracle_id
-        WHERE ${base.sql}
+        WHERE ${baseForRarity.sql}
         GROUP BY k
         ORDER BY n DESC, k ASC
       `,
       )
-      .all(...base.params) as { k: string; n: number }[];
+      .all(...baseForRarity.params) as { k: string; n: number }[];
 
     const colorRows = db
       .prepare(
@@ -100,12 +130,12 @@ export async function GET(req: NextRequest) {
           COUNT(DISTINCT c.oracle_id) AS n
         FROM cards c
         LEFT JOIN json_each(COALESCE(c.color_identity, '[]')) AS j ON 1=1
-        WHERE ${base.sql}
+        WHERE ${baseForColors.sql}
         GROUP BY k
         ORDER BY n DESC, k ASC
       `,
       )
-      .all(...base.params) as { k: string; n: number }[];
+      .all(...baseForColors.params) as { k: string; n: number }[];
 
     const cmcRow = db
       .prepare(
@@ -124,43 +154,43 @@ export async function GET(req: NextRequest) {
         `
         SELECT COUNT(DISTINCT c.oracle_id) AS n
         FROM cards c
-        WHERE ${base.sql}
+        WHERE ${baseForRowScope.sql}
           AND EXISTS (
             SELECT 1 FROM owned_cards o
             WHERE o.user_id = ? AND o.scryfall_id IN (SELECT scryfall_id FROM printings px WHERE px.oracle_id = c.oracle_id)
           )
       `,
       )
-      .get(...base.params, userId) as { n: number };
+      .get(...baseForRowScope.params, userId) as { n: number };
 
     const watchRow = db
       .prepare(
         `
         SELECT COUNT(DISTINCT c.oracle_id) AS n
         FROM cards c
-        WHERE ${base.sql}
+        WHERE ${baseForRowScope.sql}
           AND EXISTS (
             SELECT 1 FROM watchlist w
             WHERE w.user_id = ? AND w.scryfall_id IN (SELECT scryfall_id FROM printings px WHERE px.oracle_id = c.oracle_id)
           )
       `,
       )
-      .get(...base.params, userId) as { n: number };
+      .get(...baseForRowScope.params, userId) as { n: number };
 
     const pinnedRow = db
       .prepare(
         `
         SELECT COUNT(DISTINCT c.oracle_id) AS n
         FROM cards c
-        WHERE ${base.sql}
+        WHERE ${baseForRowScope.sql}
           AND EXISTS (SELECT 1 FROM pinned pin WHERE pin.user_id = ? AND pin.oracle_id = c.oracle_id)
       `,
       )
-      .get(...base.params, userId) as { n: number };
+      .get(...baseForRowScope.params, userId) as { n: number };
 
     const reservedRow = db
-      .prepare(`SELECT COUNT(DISTINCT c.oracle_id) AS n FROM cards c WHERE ${base.sql} AND c.is_reserved = 1`)
-      .get(...base.params) as { n: number };
+      .prepare(`SELECT COUNT(DISTINCT c.oracle_id) AS n FROM cards c WHERE ${baseForRowScope.sql} AND c.is_reserved = 1`)
+      .get(...baseForRowScope.params) as { n: number };
 
     const formatsRows = db
       .prepare(
@@ -168,12 +198,12 @@ export async function GET(req: NextRequest) {
         SELECT LOWER(j.key) AS k, COUNT(DISTINCT c.oracle_id) AS n
         FROM cards c
         JOIN json_each(COALESCE(c.legalities, '{}')) AS j
-        WHERE ${base.sql} AND j.value = 'legal'
+        WHERE ${baseForFormats.sql} AND j.value = 'legal'
         GROUP BY k
         ORDER BY n DESC, k ASC
       `,
       )
-      .all(...base.params) as { k: string; n: number }[];
+      .all(...baseForFormats.params) as { k: string; n: number }[];
 
     const typesRows = db
       .prepare(
@@ -182,13 +212,13 @@ export async function GET(req: NextRequest) {
           LOWER(COALESCE(NULLIF(TRIM(SUBSTR(COALESCE(c.type_line, ''), 1, 16)), ''), '(none)')) AS k,
           COUNT(DISTINCT c.oracle_id) AS n
         FROM cards c
-        WHERE ${base.sql}
+        WHERE ${baseForTypes.sql}
         GROUP BY k
         ORDER BY n DESC, k ASC
         LIMIT 24
       `,
       )
-      .all(...base.params) as { k: string; n: number }[];
+      .all(...baseForTypes.params) as { k: string; n: number }[];
 
     const topSetsRows =
       physicalSetCodes.length > 0
