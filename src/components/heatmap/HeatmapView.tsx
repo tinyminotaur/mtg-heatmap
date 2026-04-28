@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
 import { useTheme } from "@/components/app-theme-provider";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -266,7 +266,7 @@ export function HeatmapView() {
     queryKey: ["heatmap", queryString],
     queryFn: () => fetchJson(`/api/heatmap?${queryString}`),
     // Keep rendering the previous heatmap while the next one loads (no “blink out”).
-    placeholderData: (prev) => prev,
+    placeholderData: keepPreviousData,
   });
 
   const { data: statusData } = useQuery<StatusResponse>({
