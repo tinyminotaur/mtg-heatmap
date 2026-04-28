@@ -71,6 +71,21 @@ const RARITIES = ["common", "uncommon", "rare", "mythic", "special", "bonus"] as
 const PREVIEW_PANEL_W = 400;
 const PREVIEW_APPROX_H = 480;
 
+type StatusResponse = {
+  ok: true;
+  last_updated_utc: string | null;
+  refresh_schedule: { kind: "daily"; hour_utc: number; minute_utc: number };
+};
+
+function nextUtcDaily(h: number, m: number, now = new Date()): Date {
+  const y = now.getUTCFullYear();
+  const mon = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const candidate = new Date(Date.UTC(y, mon, d, h, m, 0, 0));
+  if (candidate.getTime() > now.getTime()) return candidate;
+  return new Date(Date.UTC(y, mon, d + 1, h, m, 0, 0));
+}
+
 function computeFloatingPreviewPosition(
   anchor: HeatmapCellAnchorRect | null | undefined,
   fallbackX: number,
@@ -211,6 +226,13 @@ export function HeatmapView() {
   const { data, isLoading, error } = useQuery<HeatmapResponse>({
     queryKey: ["heatmap", queryString],
     queryFn: () => fetchJson(`/api/heatmap?${queryString}`),
+  });
+
+  const { data: statusData } = useQuery<StatusResponse>({
+    queryKey: ["heatmap-status"],
+    queryFn: () => fetchJson(`/api/status`),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
   });
 
   const priceMode = useMemo(() => parseHeatmapCellPriceField(sp) as PriceMode, [sp]);
@@ -680,6 +702,31 @@ export function HeatmapView() {
     setCardDetailOpen(true);
   }, [floatingPreview]);
 
+  const statusLine = useMemo(() => {
+    const s = statusData;
+    if (!s?.ok) return null;
+    const last =
+      s.last_updated_utc && s.last_updated_utc.trim()
+        ? new Date(`${s.last_updated_utc.replace(" ", "T")}Z`)
+        : null;
+    const next =
+      s.refresh_schedule?.kind === "daily"
+        ? nextUtcDaily(s.refresh_schedule.hour_utc, s.refresh_schedule.minute_utc)
+        : null;
+    const fmt = new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    return {
+      lastLabel: last ? fmt.format(last) : "unknown",
+      nextLabel: next ? fmt.format(next) : "unknown",
+    };
+  }, [statusData]);
+
   return (
     <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden p-4">
       <HeatmapCommandPalette
@@ -697,6 +744,13 @@ export function HeatmapView() {
             Rows = cards · Columns = all sets matching filters · POC ≤ 2005 · header row / name column
             stay fixed while scrolling
           </p>
+          {statusLine ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Data updates nightly (09:00 UTC) · Last updated:{" "}
+              <span className="font-mono">{statusLine.lastLabel}</span> · Next update:{" "}
+              <span className="font-mono">{statusLine.nextLabel}</span>
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link
