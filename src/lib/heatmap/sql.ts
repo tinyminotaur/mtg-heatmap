@@ -1,6 +1,5 @@
 import type { HeatmapFilters } from "@/lib/filter-state";
 import { compileAdvancedFiltersToSql } from "@/lib/heatmap/advanced-filters";
-import { LOCAL_USER_ID } from "@/lib/constants";
 
 export function groupKeyExpr(f: HeatmapFilters): string | null {
   switch (f.groupBy) {
@@ -83,13 +82,6 @@ export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unkno
     parts.push(`COALESCE(c.cmc, 0) <= ?`);
     params.push(f.cmcMax);
   }
-  if (f.advancedFilters) {
-    const adv = compileAdvancedFiltersToSql(f.advancedFilters, { userId: LOCAL_USER_ID });
-    if (adv.sql.trim()) {
-      parts.push(adv.sql);
-      params.push(...adv.params);
-    }
-  }
   return { sql: parts.join(" AND "), params };
 }
 
@@ -168,6 +160,17 @@ export function buildHaving(
       `EXISTS (SELECT 1 FROM pinned pin WHERE pin.user_id = ? AND pin.oracle_id = c.oracle_id)`,
     );
     params.push(userId);
+  }
+  if (f.advancedFilters) {
+    const adv = compileAdvancedFiltersToSql(f.advancedFilters, {
+      userId,
+      priceSetCodes: priceSets,
+      allowVisiblePrice: !skipPrice,
+    });
+    if (adv.sql.trim()) {
+      parts.push(adv.sql);
+      params.push(...adv.params);
+    }
   }
   const sql = parts.length ? `AND (${parts.join(" AND ")})` : "";
   return { sql, params };

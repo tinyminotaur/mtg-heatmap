@@ -5,15 +5,30 @@ export type FilterGroup = {
 
 export type FilterRule =
   | { field: "name"; op: "contains"; value: string }
+  | { field: "name"; op: "not_contains"; value: string }
   | { field: "oracle_text"; op: "contains"; value: string }
+  | { field: "oracle_text"; op: "not_contains"; value: string }
   | { field: "type_line"; op: "contains"; value: string }
+  | { field: "type_line"; op: "not_contains"; value: string }
   | { field: "reserved"; op: "is"; value: boolean }
   | { field: "cmc"; op: "between"; value: [number, number] }
+  | { field: "cmc"; op: "gt" | "gte" | "lt" | "lte"; value: number }
   | { field: "color_identity"; op: "in"; value: string[] } // W/U/B/R/G/C
+  | { field: "color_identity"; op: "not_in"; value: string[] }
   | { field: "format"; op: "in"; value: string[] } // standard, modern, ...
+  | { field: "format"; op: "not_in"; value: string[] }
   | { field: "rarity"; op: "in"; value: string[] } // common, uncommon, ...
+  | { field: "rarity"; op: "not_in"; value: string[] }
+  | { field: "set_code"; op: "in"; value: string[] }
+  | { field: "set_code"; op: "not_in"; value: string[] }
+  | { field: "set_type"; op: "in"; value: string[] }
+  | { field: "set_type"; op: "not_in"; value: string[] }
+  | { field: "release_year"; op: "between"; value: [number, number] }
   | { field: "price_usd_like"; op: "gt" | "lt"; value: number }
+  | { field: "price_usd_like"; op: "gte" | "lte"; value: number }
   | { field: "price_usd_like"; op: "between"; value: [number, number] }
+  | { field: "price_visible_usd_like"; op: "gt" | "gte" | "lt" | "lte"; value: number }
+  | { field: "price_visible_usd_like"; op: "between"; value: [number, number] }
   | { field: "owned"; op: "is"; value: boolean }
   | { field: "watchlist"; op: "is"; value: boolean }
   | { field: "pinned"; op: "is"; value: boolean };
@@ -54,16 +69,32 @@ export function parseAdvancedFiltersFromJson(v: unknown): FilterGroup | null {
     const rop = r.op;
     const value = r.value;
     if (field === "name" && rop === "contains" && typeof value === "string") parsed.push({ field, op: rop, value });
+    else if (field === "name" && rop === "not_contains" && typeof value === "string") parsed.push({ field, op: rop, value });
     else if (field === "oracle_text" && rop === "contains" && typeof value === "string") parsed.push({ field, op: rop, value });
+    else if (field === "oracle_text" && rop === "not_contains" && typeof value === "string") parsed.push({ field, op: rop, value });
     else if (field === "type_line" && rop === "contains" && typeof value === "string") parsed.push({ field, op: rop, value });
+    else if (field === "type_line" && rop === "not_contains" && typeof value === "string") parsed.push({ field, op: rop, value });
     else if (field === "reserved" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "cmc" && rop === "between" && isNumberTuple2(value)) parsed.push({ field, op: rop, value });
+    else if (field === "cmc" && (rop === "gt" || rop === "gte" || rop === "lt" || rop === "lte") && typeof value === "number" && Number.isFinite(value))
+      parsed.push({ field, op: rop, value });
     else if (field === "color_identity" && rop === "in" && isStringArray(value)) parsed.push({ field, op: rop, value });
+    else if (field === "color_identity" && rop === "not_in" && isStringArray(value)) parsed.push({ field, op: rop, value });
     else if (field === "format" && rop === "in" && isStringArray(value)) parsed.push({ field, op: rop, value });
+    else if (field === "format" && rop === "not_in" && isStringArray(value)) parsed.push({ field, op: rop, value });
     else if (field === "rarity" && rop === "in" && isStringArray(value)) parsed.push({ field, op: rop, value });
-    else if (field === "price_usd_like" && (rop === "gt" || rop === "lt") && typeof value === "number" && Number.isFinite(value))
+    else if (field === "rarity" && rop === "not_in" && isStringArray(value)) parsed.push({ field, op: rop, value });
+    else if (field === "set_code" && (rop === "in" || rop === "not_in") && isStringArray(value))
+      parsed.push({ field, op: rop, value });
+    else if (field === "set_type" && (rop === "in" || rop === "not_in") && isStringArray(value))
+      parsed.push({ field, op: rop, value });
+    else if (field === "release_year" && rop === "between" && isNumberTuple2(value)) parsed.push({ field, op: rop, value });
+    else if (field === "price_usd_like" && (rop === "gt" || rop === "gte" || rop === "lt" || rop === "lte") && typeof value === "number" && Number.isFinite(value))
       parsed.push({ field, op: rop, value });
     else if (field === "price_usd_like" && rop === "between" && isNumberTuple2(value)) parsed.push({ field, op: rop, value });
+    else if (field === "price_visible_usd_like" && (rop === "gt" || rop === "gte" || rop === "lt" || rop === "lte") && typeof value === "number" && Number.isFinite(value))
+      parsed.push({ field, op: rop, value });
+    else if (field === "price_visible_usd_like" && rop === "between" && isNumberTuple2(value)) parsed.push({ field, op: rop, value });
     else if (field === "owned" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "watchlist" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
     else if (field === "pinned" && rop === "is" && typeof value === "boolean") parsed.push({ field, op: rop, value });
@@ -102,7 +133,7 @@ export function encodeAdvancedFiltersParam(g: FilterGroup): string {
 
 export function compileAdvancedFiltersToSql(
   g: FilterGroup,
-  opts: { userId: string },
+  opts: { userId: string; priceSetCodes?: string[]; allowVisiblePrice?: boolean },
 ): { sql: string; params: unknown[] } {
   const params: unknown[] = [];
   const compile = (node: FilterGroup | FilterRule): string => {
@@ -116,17 +147,34 @@ export function compileAdvancedFiltersToSql(
     const r = node as FilterRule;
     switch (r.field) {
       case "name":
+        if (r.op === "not_contains") {
+          params.push(`%${r.value.trim()}%`);
+          return `c.name NOT LIKE ?`;
+        }
         params.push(`%${r.value.trim()}%`);
         return `c.name LIKE ?`;
       case "oracle_text":
+        if (r.op === "not_contains") {
+          params.push(`%${r.value.trim().toLowerCase()}%`);
+          return `LOWER(COALESCE(c.oracle_text, '')) NOT LIKE ?`;
+        }
         params.push(`%${r.value.trim().toLowerCase()}%`);
         return `LOWER(COALESCE(c.oracle_text, '')) LIKE ?`;
       case "type_line":
+        if (r.op === "not_contains") {
+          params.push(`%${r.value.trim().toLowerCase()}%`);
+          return `LOWER(COALESCE(c.type_line, '')) NOT LIKE ?`;
+        }
         params.push(`%${r.value.trim().toLowerCase()}%`);
         return `LOWER(COALESCE(c.type_line, '')) LIKE ?`;
       case "reserved":
         return r.value ? `c.is_reserved = 1` : `c.is_reserved = 0`;
       case "cmc": {
+        if (r.op !== "between") {
+          const op = r.op === "gt" ? ">" : r.op === "gte" ? ">=" : r.op === "lt" ? "<" : "<=";
+          params.push(r.value);
+          return `COALESCE(c.cmc, 0) ${op} ?`;
+        }
         const [a, b] = r.value;
         params.push(Math.min(a, b), Math.max(a, b));
         return `COALESCE(c.cmc, 0) BETWEEN ? AND ?`;
@@ -142,7 +190,8 @@ export function compileAdvancedFiltersToSql(
             parts.push(`instr(COALESCE(c.color_identity, c.colors, ''), ?) > 0`);
           }
         }
-        return `(${parts.join(" OR ")})`;
+        const inner = `(${parts.join(" OR ")})`;
+        return r.op === "not_in" ? `(NOT ${inner})` : inner;
       }
       case "format": {
         const fmts = r.value.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
@@ -152,32 +201,59 @@ export function compileAdvancedFiltersToSql(
           params.push(fmt);
           parts.push(`json_extract(c.legalities, '$.' || ?) = 'legal'`);
         }
-        return `(${parts.join(" OR ")})`;
+        const inner = `(${parts.join(" OR ")})`;
+        return r.op === "not_in" ? `(NOT ${inner})` : inner;
       }
       case "rarity": {
         const rs = r.value.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
         if (!rs.length) return "";
         const ph = rs.map(() => "?").join(",");
         params.push(...rs);
-        return `EXISTS (SELECT 1 FROM printings p2 WHERE p2.oracle_id = c.oracle_id AND p2.rarity IN (${ph}))`;
+        const inner = `EXISTS (SELECT 1 FROM printings p2 WHERE p2.oracle_id = c.oracle_id AND p2.rarity IN (${ph}))`;
+        return r.op === "not_in" ? `(NOT ${inner})` : inner;
+      }
+      case "set_code": {
+        const codes = r.value.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+        if (!codes.length) return "";
+        const ph = codes.map(() => "?").join(",");
+        params.push(...codes);
+        const inner = `EXISTS (SELECT 1 FROM printings psc WHERE psc.oracle_id = c.oracle_id AND LOWER(psc.set_code) IN (${ph}))`;
+        return r.op === "not_in" ? `(NOT ${inner})` : inner;
+      }
+      case "set_type": {
+        const tys = r.value.map((x) => String(x).trim()).filter(Boolean);
+        if (!tys.length) return "";
+        const ph = tys.map(() => "?").join(",");
+        params.push(...tys);
+        const inner = `EXISTS (
+          SELECT 1 FROM printings pst
+          INNER JOIN sets sst ON sst.code = pst.set_code
+          WHERE pst.oracle_id = c.oracle_id AND COALESCE(sst.set_type, '') IN (${ph})
+        )`;
+        return r.op === "not_in" ? `(NOT ${inner})` : inner;
+      }
+      case "release_year": {
+        const [a0, b0] = r.value;
+        const a = Math.min(a0, b0);
+        const b = Math.max(a0, b0);
+        params.push(a, b);
+        return `EXISTS (
+          SELECT 1 FROM printings py
+          INNER JOIN sets sy ON sy.code = py.set_code
+          WHERE py.oracle_id = c.oracle_id
+            AND sy.release_date IS NOT NULL
+            AND CAST(strftime('%Y', sy.release_date) AS INTEGER) BETWEEN ? AND ?
+        )`;
       }
       case "price_usd_like": {
-        if (r.op === "gt") {
+        if (r.op === "gt" || r.op === "gte" || r.op === "lt" || r.op === "lte") {
+          const op = r.op === "gt" ? ">" : r.op === "gte" ? ">=" : r.op === "lt" ? "<" : "<=";
           params.push(r.value);
           return `EXISTS (
             SELECT 1 FROM printings p3 JOIN prices_current pc3 ON pc3.scryfall_id = p3.scryfall_id
             WHERE p3.oracle_id = c.oracle_id
               AND COALESCE(pc3.usd, pc3.usd_foil) IS NOT NULL
-              AND COALESCE(pc3.usd, pc3.usd_foil) > ?
-          )`;
-        }
-        if (r.op === "lt") {
-          params.push(r.value);
-          return `EXISTS (
-            SELECT 1 FROM printings p3 JOIN prices_current pc3 ON pc3.scryfall_id = p3.scryfall_id
-            WHERE p3.oracle_id = c.oracle_id
-              AND COALESCE(pc3.usd, pc3.usd_foil) IS NOT NULL
-              AND COALESCE(pc3.usd, pc3.usd_foil) < ?
+              AND COALESCE(pc3.usd, pc3.usd_foil) ${op} ?
           )`;
         }
         const v = r.value as unknown;
@@ -189,6 +265,34 @@ export function compileAdvancedFiltersToSql(
           WHERE p3.oracle_id = c.oracle_id
             AND COALESCE(pc3.usd, pc3.usd_foil) IS NOT NULL
             AND COALESCE(pc3.usd, pc3.usd_foil) BETWEEN ? AND ?
+        )`;
+      }
+      case "price_visible_usd_like": {
+        if (opts.allowVisiblePrice === false) return "";
+        const codes = (opts.priceSetCodes ?? []).filter(Boolean);
+        if (!codes.length) return "0=1";
+        const ph = codes.map(() => "?").join(",");
+        if (r.op === "gt" || r.op === "gte" || r.op === "lt" || r.op === "lte") {
+          const op = r.op === "gt" ? ">" : r.op === "gte" ? ">=" : r.op === "lt" ? "<" : "<=";
+          params.push(...codes, r.value);
+          return `EXISTS (
+            SELECT 1 FROM printings pv JOIN prices_current pcv ON pcv.scryfall_id = pv.scryfall_id
+            WHERE pv.oracle_id = c.oracle_id
+              AND pv.set_code IN (${ph})
+              AND COALESCE(pcv.usd, pcv.usd_foil) IS NOT NULL
+              AND COALESCE(pcv.usd, pcv.usd_foil) ${op} ?
+          )`;
+        }
+        const v = r.value as unknown;
+        if (!Array.isArray(v) || v.length !== 2) return "";
+        const [a, b] = v as [number, number];
+        params.push(...codes, Math.min(a, b), Math.max(a, b));
+        return `EXISTS (
+          SELECT 1 FROM printings pv JOIN prices_current pcv ON pcv.scryfall_id = pv.scryfall_id
+          WHERE pv.oracle_id = c.oracle_id
+            AND pv.set_code IN (${ph})
+            AND COALESCE(pcv.usd, pcv.usd_foil) IS NOT NULL
+            AND COALESCE(pcv.usd, pcv.usd_foil) BETWEEN ? AND ?
         )`;
       }
       case "owned":

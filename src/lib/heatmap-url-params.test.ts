@@ -142,7 +142,7 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
           op: "or",
           rules: [
             { field: "reserved", op: "is", value: true },
-            { field: "price_usd_like", op: "gt", value: 10 },
+            { field: "price_visible_usd_like", op: "gte", value: 10 },
           ],
         },
       ],
