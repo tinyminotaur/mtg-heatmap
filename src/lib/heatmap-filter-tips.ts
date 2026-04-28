@@ -23,8 +23,12 @@ export const HEATMAP_FILTER_TIPS = {
     "Restricts rows to oracle cards you have pinned in this app. Unrelated to the pinned strip layout option.",
   ],
   facetsBadge: [
-    "“Facets” are row filters that look at printings: rarity, release year, and USD range (evaluated in your visible set columns unless you widen scope in the chip bar).",
+    "“Facets” are row filters that look at printings: rarity, release year, mana cost (CMC), and USD range (evaluated in your visible set columns unless you widen scope in the chip bar).",
     "This badge only tells you whether any of those are turned on. Open Sheet filters to change them.",
+  ],
+  sheetCmc: [
+    "Filters oracle cards by converted mana cost (total mana value on the front face). Matches Scryfall’s `cmc` field.",
+    "Null or missing mana cost in the database is treated as 0 for min/max comparisons.",
   ],
   valueAggVisible: [
     "For min / median / max row sorts, values use the same Scryfall price field as the Price control (USD, USD foil-preferring, EUR, or tix), only from printings in sets that appear as columns (after column filters).",

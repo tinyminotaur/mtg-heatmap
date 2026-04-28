@@ -75,6 +75,10 @@ export function formatHeatmapCellPriceLabel(
 ): string | null {
   const p = cellPriceForMode(cell, mode);
   if (p == null) return null;
+  if (mode === "usd" || mode === "usd_foil") {
+    if (p >= 10) return `$${Math.ceil(p)}`;
+    return `$${p.toFixed(2)}`;
+  }
   const body = new Intl.NumberFormat("en-US", {
     maximumFractionDigits: mode === "tix" ? 1 : 2,
     minimumFractionDigits: 0,

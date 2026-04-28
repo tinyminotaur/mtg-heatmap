@@ -77,6 +77,8 @@ function rowToMeta(r: Omit<ColumnMeta, "year">): ColumnMeta {
   return { ...r, year: yearFromDate(r.release_date) };
 }
 
+type SetColumnRow = Omit<ColumnMeta, "year">;
+
 /**
  * §11.2.3–11.2.4 — Distinct heatmap columns for the full filtered card set (stable across pages).
  */
@@ -90,7 +92,7 @@ export function resolveHeatmapColumns(
   userId: string,
 ): ColumnMeta[] {
   let qualSql = `
-    SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path
+    SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
     FROM sets s
     INNER JOIN printings p ON p.set_code = s.code
     WHERE p.oracle_id IN (SELECT c.oracle_id FROM cards c WHERE ${cardPred} ${havingSql})
@@ -99,7 +101,7 @@ export function resolveHeatmapColumns(
   const qualParams: unknown[] = [...cardParams, ...havingParams, POC_RELEASE_CUTOFF];
   const qualScoped = appendColumnScopeFilters(f, qualSql, qualParams);
   qualSql = `${qualScoped.sql} ORDER BY s.release_date ASC, s.code ASC`;
-  const qualRows = db.prepare(qualSql).all(...qualScoped.params) as Omit<ColumnMeta, "year">[];
+  const qualRows = db.prepare(qualSql).all(...qualScoped.params) as SetColumnRow[];
 
   const byCode = new Map<string, ColumnMeta>();
   for (const r of qualRows) {
@@ -108,14 +110,14 @@ export function resolveHeatmapColumns(
 
   if (f.showEmptyColumns) {
     let scopeSql = `
-      SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path
+      SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
       FROM sets s
       WHERE (s.release_date IS NULL OR s.release_date <= ?)
     `;
     const scopeParams: unknown[] = [POC_RELEASE_CUTOFF];
     const scopeScoped = appendColumnScopeFilters(f, scopeSql, scopeParams);
     scopeSql = `${scopeScoped.sql} ORDER BY s.release_date ASC, s.code ASC`;
-    const scopeRows = db.prepare(scopeScoped.sql).all(...scopeScoped.params) as Omit<ColumnMeta, "year">[];
+    const scopeRows = db.prepare(scopeScoped.sql).all(...scopeScoped.params) as SetColumnRow[];
     for (const r of scopeRows) {
       if (!byCode.has(r.code)) byCode.set(r.code, rowToMeta(r));
     }
@@ -126,7 +128,7 @@ export function resolveHeatmapColumns(
     const notIn =
       known.length > 0 ? `AND p.set_code NOT IN (${known.map(() => "?").join(",")})` : "";
     const pinSql = `
-      SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path
+      SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
       FROM pinned pin
       INNER JOIN printings p ON p.oracle_id = pin.oracle_id
       INNER JOIN sets s ON s.code = p.set_code
@@ -135,9 +137,27 @@ export function resolveHeatmapColumns(
     `;
     const pinParams: unknown[] = [userId, ...known, POC_RELEASE_CUTOFF];
     const pinScoped = appendColumnScopeFilters(f, pinSql, pinParams);
-    const pinRows = db.prepare(pinScoped.sql).all(...pinScoped.params) as Omit<ColumnMeta, "year">[];
+    const pinRows = db.prepare(pinScoped.sql).all(...pinScoped.params) as SetColumnRow[];
     for (const r of pinRows) {
       if (!byCode.has(r.code)) byCode.set(r.code, rowToMeta(r));
+    }
+  }
+
+  if (f.quickPinCols?.length) {
+    const want = [...new Set(f.quickPinCols.map((c) => c.trim().toLowerCase()).filter(Boolean))];
+    const missing = want.filter((code) => !byCode.has(code));
+    if (missing.length) {
+      const ph = missing.map(() => "?").join(",");
+      const forced = db
+        .prepare(
+          `SELECT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
+           FROM sets s
+           WHERE s.code IN (${ph}) AND (s.release_date IS NULL OR s.release_date <= ?)`,
+        )
+        .all(...missing, POC_RELEASE_CUTOFF) as SetColumnRow[];
+      for (const r of forced) {
+        if (!byCode.has(r.code)) byCode.set(r.code, rowToMeta(r));
+      }
     }
   }
 

@@ -1,8 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
 import { useTheme } from "@/components/app-theme-provider";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -10,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
-import { cardImageUrlForDetail, cardImageUrlForPreview } from "@/lib/card-image-urls";
+import { cardImageUrlForDetail, cardImageUrlForPreview, cardImageUrlForRowPreview } from "@/lib/card-image-urls";
 import { readHeatmapSession, writeHeatmapSession } from "@/lib/heatmap-session";
 import { formatPriceKind, getHeatmapPriceRange } from "@/lib/heatmap-best-deal";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
@@ -20,7 +19,22 @@ import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
 import { HeatmapFilterBar, type ViewSessionMeta } from "./HeatmapFilterBar";
 import { HeatmapGrid, type HeatmapCellAnchorRect, type HeatmapGridHandle } from "./HeatmapGrid";
 import { HeatmapGuideDialog } from "./HeatmapGuideDialog";
+import { OwnedListPanel } from "@/components/owned/OwnedListPanel";
+import { WatchlistListPanel } from "@/components/watchlist/WatchlistListPanel";
 import { Bookmark, Library, Maximize2, Palette, Search, X } from "lucide-react";
+
+/** Toggle `qr=` / `qc=` comma lists in the URL (session quick-pins). */
+function patchCommaSearchParam(sp: ReadonlyURLSearchParams, key: "qr" | "qc", token: string): URLSearchParams {
+  const cur = sp.get(key)?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+  const t = key === "qc" ? token.trim().toLowerCase() : token.trim();
+  if (!t) return new URLSearchParams(sp.toString());
+  const i = cur.indexOf(t);
+  const next = i >= 0 ? cur.filter((_, j) => j !== i) : [...cur, t];
+  const p = new URLSearchParams(sp.toString());
+  if (next.length) p.set(key, next.join(","));
+  else p.delete(key);
+  return p;
+}
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -43,6 +57,37 @@ type HeatmapResponse = { columns: ColumnMeta[]; rows: RowDTO[]; total: number };
 /** Floating preview: vertical card + text needs width; height used for viewport clamping. */
 const PREVIEW_PANEL_W = 400;
 const PREVIEW_APPROX_H = 480;
+const PREVIEW_EDITION_APPROX_H = 300;
+
+function humanizeSetType(setType: string | null): string {
+  if (!setType) return "Magic: The Gathering edition.";
+  const map: Record<string, string> = {
+    core: "Core set — evergreen cards aimed at newer players.",
+    expansion: "Expansion — large standalone release with new mechanics.",
+    masters: "Masters-style — reprints aimed at constructed formats.",
+    commander: "Commander product.",
+    draft_innovation: "Draft-focused innovation set.",
+    masterpiece: "Masterpiece / ultra-premium subset.",
+    promo: "Promotional release.",
+    duel_deck: "Duel Decks–style duel product.",
+    starter: "Starter / introductory product.",
+    box: "Box set or compilation.",
+    from_the_vault: "From the Vault–style premium reprint subset.",
+    premium_deck: "Premium deck product.",
+    funpack: "Fun Pack / casual product.",
+  };
+  return map[setType] ?? `Scryfall set type “${setType.replace(/_/g, " ")}”.`;
+}
+
+function firstDetailCell(row: RowDTO): CellDTO | null {
+  for (const c of row.cells) {
+    if (c?.scryfall_uri) return c;
+  }
+  for (const c of row.cells) {
+    if (c) return c;
+  }
+  return null;
+}
 
 type StatusResponse = {
   ok: true;
@@ -63,6 +108,7 @@ function computeFloatingPreviewPosition(
   anchor: HeatmapCellAnchorRect | null | undefined,
   fallbackX: number,
   fallbackY: number,
+  approxH: number = PREVIEW_APPROX_H,
 ): { left: number; top: number; width: number } {
   const pad = 10;
   const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
@@ -78,11 +124,11 @@ function computeFloatingPreviewPosition(
     if (rightSide + width <= vw - pad) left = rightSide;
     else if (leftSide >= pad) left = leftSide;
     else left = Math.max(pad, Math.min(rightSide, vw - width - pad));
-    top = anchor.top + (anchor.height - PREVIEW_APPROX_H) / 2;
-    top = Math.max(pad, Math.min(top, vh - PREVIEW_APPROX_H - pad));
+    top = anchor.top + (anchor.height - approxH) / 2;
+    top = Math.max(pad, Math.min(top, vh - approxH - pad));
   } else {
     left = Math.max(pad, Math.min(fallbackX + 12, vw - width - pad));
-    top = Math.max(pad, Math.min(fallbackY + 12, vh - PREVIEW_APPROX_H - pad));
+    top = Math.max(pad, Math.min(fallbackY + 12, vh - approxH - pad));
   }
   return { left, top, width };
 }
@@ -131,11 +177,11 @@ function HeatmapPriceRangeCallout({
       <p className="font-semibold text-foreground">Price range on this heatmap</p>
       {compact ? (
         <p className="text-muted-foreground">
-          <span className="font-semibold text-cyan-800 dark:text-cyan-200">Lowest</span>:{" "}
+          <span className="font-semibold text-cyan-800 dark:text-cyan-200">Min</span>:{" "}
           <span className="font-mono">${lowStr}</span> ({formatPriceKind(range.lowPricedAsFoil)}) in{" "}
           <span className="font-mono">{lowCol.code.toUpperCase()}</span>
           {" · "}
-          <span className="font-semibold text-rose-800 dark:text-rose-200">Highest</span>:{" "}
+          <span className="font-semibold text-rose-800 dark:text-rose-200">Max</span>:{" "}
           <span className="font-mono">${highStr}</span> ({formatPriceKind(range.highPricedAsFoil)}) in{" "}
           <span className="font-mono">{highCol.code.toUpperCase()}</span>
         </p>
@@ -157,8 +203,8 @@ function HeatmapPriceRangeCallout({
             {formatPriceKind(range.highPricedAsFoil)}).
           </p>
           <p className="text-muted-foreground">
-            <span className="font-semibold text-cyan-800 dark:text-cyan-200">Lowest</span> /{" "}
-            <span className="font-semibold text-rose-800 dark:text-rose-200">Highest</span> badges on the grid
+            <span className="font-semibold text-cyan-800 dark:text-cyan-200">Min</span> /{" "}
+            <span className="font-semibold text-rose-800 dark:text-rose-200">Max</span> badges on the grid
             mark those cells (only when at least two columns have a price and min ≠ max).
           </p>
         </>
@@ -170,7 +216,7 @@ function HeatmapPriceRangeCallout({
             compact && "text-[11px] leading-snug",
           )}
         >
-          This cell is a lowest-priced column for this row.
+          This cell is the minimum-priced column for this row.
         </p>
       ) : onHigh && !onLow ? (
         <p
@@ -179,7 +225,7 @@ function HeatmapPriceRangeCallout({
             compact && "text-[11px] leading-snug",
           )}
         >
-          This cell is a highest-priced column for this row.
+          This cell is the maximum-priced column for this row.
         </p>
       ) : null}
     </div>
@@ -228,6 +274,18 @@ export function HeatmapView() {
     y: number;
     anchor: HeatmapCellAnchorRect;
   } | null>(null);
+  const [nameRowHover, setNameRowHover] = useState<{
+    row: number;
+    x: number;
+    y: number;
+    anchor: HeatmapCellAnchorRect;
+  } | null>(null);
+  const [editionHeaderHover, setEditionHeaderHover] = useState<{
+    col: number;
+    x: number;
+    y: number;
+    anchor: HeatmapCellAnchorRect;
+  } | null>(null);
   const [previewPinned, setPreviewPinned] = useState(false);
   const [anchorEpoch, setAnchorEpoch] = useState(0);
   const [pinnedAnchor, setPinnedAnchor] = useState<HeatmapCellAnchorRect | null>(null);
@@ -239,6 +297,8 @@ export function HeatmapView() {
   } | null>(null);
   const hoverDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cardPreviewRef = useRef<HTMLDivElement>(null);
+  const nameRowPreviewRef = useRef<HTMLDivElement>(null);
+  const editionPreviewRef = useRef<HTMLDivElement>(null);
   const heatmapGridRef = useRef<HeatmapGridHandle>(null);
   const heatmapPortRef = useRef<HTMLDivElement>(null);
 
@@ -251,14 +311,29 @@ export function HeatmapView() {
 
   const scheduleHoverDismiss = useCallback(() => {
     cancelHoverDismiss();
-    hoverDismissRef.current = setTimeout(() => setHover(null), 450);
+    hoverDismissRef.current = setTimeout(() => {
+      setHover(null);
+      setNameRowHover(null);
+      setEditionHeaderHover(null);
+    }, 450);
   }, [cancelHoverDismiss]);
 
   /** Immediate hover clear (leaving the grid port or a non-preview cell). */
   const clearHoverNow = useCallback(() => {
     cancelHoverDismiss();
     setHover(null);
+    setNameRowHover(null);
+    setEditionHeaderHover(null);
   }, [cancelHoverDismiss]);
+
+  const hoverPreviewContains = useCallback((node: EventTarget | Node | null) => {
+    if (!(node instanceof Node)) return false;
+    return Boolean(
+      cardPreviewRef.current?.contains(node) ||
+        nameRowPreviewRef.current?.contains(node) ||
+        editionPreviewRef.current?.contains(node),
+    );
+  }, []);
 
   useEffect(() => {
     return () => cancelHoverDismiss();
@@ -272,6 +347,8 @@ export function HeatmapView() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [ownedOverlayOpen, setOwnedOverlayOpen] = useState(false);
+  const [wishlistOverlayOpen, setWishlistOverlayOpen] = useState(false);
   const [modK, setModK] = useState("⌘K / Ctrl+K");
   useEffect(() => {
     setModK(/mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘K" : "Ctrl+K");
@@ -450,6 +527,23 @@ export function HeatmapView() {
     await qc.invalidateQueries({ queryKey: ["heatmap"] });
   }, [qc, rows, rowIndex]);
 
+  const toggleQuickPinRowForOracle = useCallback(
+    (oracleId: string) => {
+      const p = patchCommaSearchParam(sp, "qr", oracleId);
+      router.replace(`/?${p.toString()}`);
+    },
+    [router, sp],
+  );
+
+  const toggleQuickPinColForCode = useCallback(
+    (setCode: string) => {
+      if (setCode.startsWith("__")) return;
+      const p = patchCommaSearchParam(sp, "qc", setCode);
+      router.replace(`/?${p.toString()}`);
+    },
+    [router, sp],
+  );
+
   const openScryfallSelection = useCallback(() => {
     const cell = rows[rowIndex]?.cells[colIndex];
     const uri = cell?.scryfall_uri;
@@ -484,6 +578,8 @@ export function HeatmapView() {
         setFiltersRootOpen(false);
         cancelHoverDismiss();
         setHover(null);
+        setNameRowHover(null);
+        setEditionHeaderHover(null);
         return;
       }
 
@@ -522,10 +618,10 @@ export function HeatmapView() {
         const k = e.key.toLowerCase();
         if (k === "o") {
           persistSessionNav();
-          router.push("/owned");
+          setOwnedOverlayOpen(true);
         } else if (k === "w") {
           persistSessionNav();
-          router.push("/watchlist");
+          setWishlistOverlayOpen(true);
         } else {
           persistSessionNav();
           router.push("/");
@@ -631,6 +727,34 @@ export function HeatmapView() {
     return computeFloatingPreviewPosition(p.anchor, p.x, p.y);
   }, [floatingPreview]);
 
+  const nameRowPreviewLayout = useMemo(() => {
+    if (!nameRowHover || previewPinned || isMobile) return null;
+    if (!rows[nameRowHover.row]) return null;
+    return computeFloatingPreviewPosition(nameRowHover.anchor, nameRowHover.x, nameRowHover.y);
+  }, [nameRowHover, rows, previewPinned, isMobile]);
+
+  const editionPreviewLayout = useMemo(() => {
+    if (!editionHeaderHover || previewPinned || isMobile) return null;
+    if (!columns[editionHeaderHover.col]) return null;
+    return computeFloatingPreviewPosition(
+      editionHeaderHover.anchor,
+      editionHeaderHover.x,
+      editionHeaderHover.y,
+      PREVIEW_EDITION_APPROX_H,
+    );
+  }, [editionHeaderHover, columns, previewPinned, isMobile]);
+
+  const openCardDetailFromNameRow = useCallback(() => {
+    if (!nameRowHover) return;
+    const row = rows[nameRowHover.row];
+    if (!row) return;
+    const cell = firstDetailCell(row);
+    if (!cell) return;
+    const col = row.cells.findIndex((c) => c === cell);
+    setDetailPayload({ row: nameRowHover.row, col: Math.max(0, col), cell });
+    setCardDetailOpen(true);
+  }, [nameRowHover, rows]);
+
   const openCardDetail = useCallback(() => {
     const p = floatingPreview;
     if (!p?.cell) return;
@@ -676,6 +800,8 @@ export function HeatmapView() {
         onOpenFilters={() => setFiltersRootOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onApplySearch={(q) => setParam("q", q)}
+        onNavigateOwned={() => setOwnedOverlayOpen(true)}
+        onNavigateWishlist={() => setWishlistOverlayOpen(true)}
       />
 
       <HeatmapGuideDialog
@@ -684,6 +810,34 @@ export function HeatmapView() {
         dark={dark}
         statusLine={statusLine}
       />
+
+      <Sheet open={ownedOverlayOpen} onOpenChange={setOwnedOverlayOpen}>
+        <SheetContent
+          side="right"
+          showCloseButton
+          className="flex w-[min(100vw-0.5rem,56rem)] max-w-none flex-col gap-0 overflow-hidden border-l bg-popover p-0 sm:w-[min(100vw-1rem,56rem)] sm:max-w-[56rem]"
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain p-4 sm:p-6">
+              <OwnedListPanel embedded />
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={wishlistOverlayOpen} onOpenChange={setWishlistOverlayOpen}>
+        <SheetContent
+          side="right"
+          showCloseButton
+          className="flex w-[min(100vw-0.5rem,56rem)] max-w-none flex-col gap-0 overflow-hidden border-l bg-popover p-0 sm:w-[min(100vw-1rem,56rem)] sm:max-w-[56rem]"
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain p-4 sm:p-6">
+              <WatchlistListPanel embedded />
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div className="glass-value-map-panel px-4 py-2.5">
@@ -700,14 +854,22 @@ export function HeatmapView() {
           className="flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:gap-2"
           aria-label="Shortcuts and pages"
         >
-          <Link href="/owned" className="header-toolbar-action">
+          <button
+            type="button"
+            className="header-toolbar-action cursor-pointer"
+            onClick={() => setOwnedOverlayOpen(true)}
+          >
             <Library className="size-4 shrink-0 text-amber-200/90" aria-hidden />
             <span>Owned</span>
-          </Link>
-          <Link href="/watchlist" className="header-toolbar-action">
+          </button>
+          <button
+            type="button"
+            className="header-toolbar-action cursor-pointer"
+            onClick={() => setWishlistOverlayOpen(true)}
+          >
             <Bookmark className="size-4 shrink-0 text-amber-200/90" aria-hidden />
             <span>Wishlist</span>
-          </Link>
+          </button>
           <button type="button" className="header-toolbar-action cursor-pointer" onClick={() => setGuideOpen(true)}>
             <Palette className="size-4 shrink-0 text-amber-200/90" aria-hidden />
             <span>Legend</span>
@@ -738,6 +900,8 @@ export function HeatmapView() {
         onOpenCommandPalette={() => setCmdOpen(true)}
         onOpenKeyboardHelp={() => setHelpOpen(true)}
         onPersistNav={persistSessionNav}
+        onOpenOwnedPanel={() => setOwnedOverlayOpen(true)}
+        onOpenWishlistPanel={() => setWishlistOverlayOpen(true)}
       />
 
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
@@ -802,6 +966,8 @@ export function HeatmapView() {
             }}
             onHoverCell={(r, c, cell, x, y, anchor) => {
               cancelHoverDismiss();
+              setNameRowHover(null);
+              setEditionHeaderHover(null);
               if (!cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode)) {
                 setHover(null);
                 return;
@@ -810,9 +976,30 @@ export function HeatmapView() {
             }}
             onLeaveGrid={clearHoverNow}
             cardPreviewContainerRef={cardPreviewRef}
+            cardPreviewContains={hoverPreviewContains}
             onViewportChange={bumpPinnedAnchor}
             interactionPortRef={heatmapPortRef}
             onHeaderSetClick={(setCode) => setParam("hcol", setCode)}
+            onHoverFrozenRowBody={
+              previewPinned || isMobile
+                ? undefined
+                : (row, x, y, anchor) => {
+                    cancelHoverDismiss();
+                    setHover(null);
+                    setEditionHeaderHover(null);
+                    setNameRowHover({ row, x, y, anchor });
+                  }
+            }
+            onHoverEditionHeader={
+              previewPinned || isMobile
+                ? undefined
+                : (col, x, y, anchor) => {
+                    cancelHoverDismiss();
+                    setHover(null);
+                    setNameRowHover(null);
+                    setEditionHeaderHover({ col, x, y, anchor });
+                  }
+            }
           />
         )}
       </div>
@@ -905,6 +1092,36 @@ export function HeatmapView() {
                 columns={columns}
                 variant="compact"
               />
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={rows[floatingPreview.row]?.quick_pin_row ? "secondary" : "outline"}
+                  onClick={() => {
+                    const row = rows[floatingPreview.row];
+                    if (row) toggleQuickPinRowForOracle(row.oracle_id);
+                  }}
+                >
+                  {rows[floatingPreview.row]?.quick_pin_row ? "Quick-pin row ✓" : "Quick-pin row"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={columns[floatingPreview.col]?.quick_pin_column ? "secondary" : "outline"}
+                  disabled={Boolean(columns[floatingPreview.col]?.code?.startsWith("__"))}
+                  onClick={() => {
+                    const code = columns[floatingPreview.col]?.code;
+                    if (code) toggleQuickPinColForCode(code);
+                  }}
+                >
+                  {columns[floatingPreview.col]?.quick_pin_column ? "Quick-pin col ✓" : "Quick-pin column"}
+                </Button>
+              </div>
+              <p className="text-[10px] leading-snug text-muted-foreground">
+                Session pins (URL <span className="font-mono">qr</span> / <span className="font-mono">qc</span>): full
+                row or column stays on the grid; printing cells are not dimmed by rarity, price, owned, or watchlist
+                filters.
+              </p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {floatingPreview.cell.scryfall_uri ? (
                   <a
@@ -937,6 +1154,159 @@ export function HeatmapView() {
                   </a>
                 ) : null}
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {nameRowHover && nameRowPreviewLayout && rows[nameRowHover.row] ? (
+        <div
+          ref={nameRowPreviewRef}
+          className="pointer-events-auto fixed z-50 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
+          style={{
+            left: nameRowPreviewLayout.left,
+            top: nameRowPreviewLayout.top,
+            width: nameRowPreviewLayout.width,
+            maxWidth: "calc(100vw - 2rem)",
+          }}
+          onMouseEnter={cancelHoverDismiss}
+          onMouseLeave={scheduleHoverDismiss}
+        >
+          <div className="mb-2 flex items-center justify-between gap-2 border-b border-border pb-2">
+            <span className="text-xs font-medium text-muted-foreground">Card</span>
+            <Button type="button" variant="secondary" size="sm" className="h-7 gap-1 text-xs" onClick={openCardDetailFromNameRow}>
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+              Expand
+            </Button>
+          </div>
+          <div className="flex flex-col gap-3">
+            {cardImageUrlForRowPreview(rows[nameRowHover.row]) ? (
+              <div className="flex justify-center border-b border-border pb-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={cardImageUrlForRowPreview(rows[nameRowHover.row])!}
+                  alt=""
+                  width={488}
+                  height={680}
+                  className="max-h-[min(280px,48vh)] w-full max-w-[240px] rounded-md border border-border object-contain"
+                  sizes="(max-width: 480px) 85vw, 240px"
+                  decoding="async"
+                />
+              </div>
+            ) : null}
+            <div className="min-w-0 space-y-1 text-sm">
+              <div className="font-medium leading-tight">{rows[nameRowHover.row]?.name}</div>
+              {rows[nameRowHover.row]?.type_line ? (
+                <div className="text-xs text-muted-foreground">{rows[nameRowHover.row]!.type_line}</div>
+              ) : null}
+              <div className="text-xs text-muted-foreground">
+                CMC{" "}
+                <span className="font-mono text-foreground">
+                  {rows[nameRowHover.row]!.cmc != null
+                    ? rows[nameRowHover.row]!.cmc!.toLocaleString(undefined, {
+                        maximumFractionDigits: 1,
+                      })
+                    : "—"}
+                </span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="mt-1 w-full"
+                variant={rows[nameRowHover.row]?.quick_pin_row ? "secondary" : "outline"}
+                onClick={() => {
+                  const row = rows[nameRowHover.row];
+                  if (row) toggleQuickPinRowForOracle(row.oracle_id);
+                }}
+              >
+                {rows[nameRowHover.row]?.quick_pin_row ? "Quick-pin row ✓" : "Quick-pin this row"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editionHeaderHover && editionPreviewLayout && columns[editionHeaderHover.col] ? (
+        <div
+          ref={editionPreviewRef}
+          className="pointer-events-auto fixed z-50 max-w-md rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
+          style={{
+            left: editionPreviewLayout.left,
+            top: editionPreviewLayout.top,
+            width: editionPreviewLayout.width,
+            maxWidth: "min(380px, calc(100vw - 2rem))",
+          }}
+          onMouseEnter={cancelHoverDismiss}
+          onMouseLeave={scheduleHoverDismiss}
+        >
+          <div className="mb-2 border-b border-border pb-2 text-xs font-medium text-muted-foreground">Edition</div>
+          <div className="flex gap-3">
+            {columns[editionHeaderHover.col]!.set_type !== "aggregate" ? (
+              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/40">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={
+                    columns[editionHeaderHover.col]!.icon_svg_path?.trim() ||
+                    `https://svgs.scryfall.io/sets/${columns[editionHeaderHover.col]!.code.toLowerCase()}.svg`
+                  }
+                  alt=""
+                  width={56}
+                  height={56}
+                  className="h-full w-full object-contain p-1"
+                  decoding="async"
+                />
+              </div>
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-[10px] font-semibold leading-tight text-muted-foreground">
+                Σ
+              </div>
+            )}
+            <div className="min-w-0 flex-1 space-y-1.5 text-sm">
+              <div className="font-semibold leading-snug">{columns[editionHeaderHover.col]!.name}</div>
+              <div className="font-mono text-xs text-muted-foreground">
+                {(columns[editionHeaderHover.col]!.code || "").toUpperCase()}
+                {columns[editionHeaderHover.col]!.year != null
+                  ? ` · ${columns[editionHeaderHover.col]!.year}`
+                  : ""}
+                {columns[editionHeaderHover.col]!.release_date
+                  ? ` · ${columns[editionHeaderHover.col]!.release_date}`
+                  : ""}
+              </div>
+              {columns[editionHeaderHover.col]!.set_type === "aggregate" ? (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Row-level aggregate: cheap / typical / expensive pricing across the visible printings for each card,
+                  using your selected price field.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {humanizeSetType(columns[editionHeaderHover.col]!.set_type)}
+                  </p>
+                  {columns[editionHeaderHover.col]!.parent_set_code ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Parent / block code:{" "}
+                      <span className="font-mono">
+                        {columns[editionHeaderHover.col]!.parent_set_code!.toUpperCase()}
+                      </span>
+                    </p>
+                  ) : null}
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Each column is one edition; cells are printings of that card from this set (when present in your
+                    column scope).
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-1 w-full"
+                    variant={columns[editionHeaderHover.col]?.quick_pin_column ? "secondary" : "outline"}
+                    onClick={() => toggleQuickPinColForCode(columns[editionHeaderHover.col]!.code)}
+                  >
+                    {columns[editionHeaderHover.col]?.quick_pin_column
+                      ? "Quick-pin column ✓"
+                      : "Quick-pin this column"}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1035,6 +1405,31 @@ export function HeatmapView() {
                   onClick={() => void decOwned()}
                 >
                   Remove one
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={rows[floatingPreview.row]?.quick_pin_row ? "secondary" : "outline"}
+                  onClick={() => {
+                    const row = rows[floatingPreview.row];
+                    if (row) toggleQuickPinRowForOracle(row.oracle_id);
+                  }}
+                >
+                  {rows[floatingPreview.row]?.quick_pin_row ? "Quick-pin row ✓" : "Quick-pin row"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={columns[floatingPreview.col]?.quick_pin_column ? "secondary" : "outline"}
+                  disabled={Boolean(columns[floatingPreview.col]?.code?.startsWith("__"))}
+                  onClick={() => {
+                    const code = columns[floatingPreview.col]?.code;
+                    if (code) toggleQuickPinColForCode(code);
+                  }}
+                >
+                  {columns[floatingPreview.col]?.quick_pin_column ? "Quick-pin col ✓" : "Quick-pin column"}
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1171,7 +1566,12 @@ export function HeatmapView() {
             <li>Arrows: move selection</li>
             <li>Enter: open Scryfall for selected printing</li>
             <li>O: add owned · Shift+O: remove one copy</li>
-            <li>W: watchlist · P: pin</li>
+            <li>W: watchlist · P: pin to favorites strip (API)</li>
+            <li>
+              Quick-pin row/column: buttons in cell preview, name popover, or edition popover; stored in URL{" "}
+              <span className="font-mono">qr</span> / <span className="font-mono">qc</span> (session, not
+              card-level)
+            </li>
             <li>F: filter sheet (draft until Apply) · /: search · Esc: close panels</li>
             <li>⌘K / Ctrl+K: command palette</li>
             <li>G then O / W / H: Owned / Watchlist / Home</li>

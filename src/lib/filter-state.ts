@@ -28,6 +28,9 @@ export type HeatmapFilters = {
   excludeGroups: string[];
   yearMin: number | null;
   yearMax: number | null;
+  /** Total mana value (CMC); uses `cards.cmc`, null treated as 0 for comparison. */
+  cmcMin: number | null;
+  cmcMax: number | null;
   priceMin: number | null;
   priceMax: number | null;
   colors: string[];
@@ -60,6 +63,13 @@ export type HeatmapFilters = {
   groupCollapsedKeys: string[];
   /** §11.5.6 — temporary single-column USD sort override. */
   headerSortSetCode: string | null;
+  /**
+   * Session-only: oracle ids pinned to the top; row stays visible and cells ignore printing-level filters
+   * (rarity / price / owned / watchlist dimming). URL `qr=`.
+   */
+  quickPinRows: string[];
+  /** Session-only: set codes forced into the column list; cells in those columns ignore printing-level filters. URL `qc=`. */
+  quickPinCols: string[];
   /** Columns: per-set vs aggregate Min / Median / Max (still uses same visible-set scope for SQL). */
   heatmapColumnLayout: HeatmapColumnLayout;
   /**
@@ -78,6 +88,8 @@ export type FilterState = {
     excludeGroups: string[];
     yearMin: number | null;
     yearMax: number | null;
+    cmcMin: number | null;
+    cmcMax: number | null;
     priceMin: number | null;
     priceMax: number | null;
     colors: string[];
@@ -90,6 +102,9 @@ export type FilterState = {
     includeDigital: boolean;
     specialGroup: string | null;
     search: string;
+    /** Session quick-pins (see HeatmapFilters.quickPinRows). */
+    quickPinRows: string[];
+    quickPinCols: string[];
   };
   display: {
     showEmptyColumns: boolean;
@@ -120,6 +135,8 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   excludeGroups: [],
   yearMin: null,
   yearMax: null,
+  cmcMin: null,
+  cmcMax: null,
   priceMin: null,
   priceMax: null,
   colors: [],
@@ -144,6 +161,8 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   groupBy: "none",
   groupCollapsedKeys: [],
   headerSortSetCode: null,
+  quickPinRows: [],
+  quickPinCols: [],
   heatmapColumnLayout: "sets",
   cellPriceField: "usd",
 };
@@ -157,6 +176,8 @@ export const DEFAULT_FILTER_STATE: FilterState = {
     excludeGroups: [],
     yearMin: null,
     yearMax: null,
+    cmcMin: null,
+    cmcMax: null,
     priceMin: null,
     priceMax: null,
     colors: [],
@@ -169,6 +190,8 @@ export const DEFAULT_FILTER_STATE: FilterState = {
     includeDigital: false,
     specialGroup: null,
     search: "",
+    quickPinRows: [],
+    quickPinCols: [],
   },
   display: {
     showEmptyColumns: false,
@@ -243,6 +266,12 @@ export function slotsToPrimarySortString(slots: SortSlot[]): string {
   return first.key;
 }
 
+/** Row-sort slots for SQL / URL when `sortSlots` is empty but legacy `sort` still describes the intent. */
+export function effectiveSortSlots(f: HeatmapFilters): SortSlot[] {
+  if (f.sortSlots?.length) return f.sortSlots;
+  return parseSortSlotsFromUrl(new URLSearchParams({ sort: f.sort }));
+}
+
 export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
   const slots: SortSlot[] = fs.sort.slots.length ? fs.sort.slots.slice(0, 3) : [{ key: "name", dir: null }];
   return {
@@ -253,6 +282,8 @@ export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
     excludeGroups: fs.filters.excludeGroups,
     yearMin: fs.filters.yearMin,
     yearMax: fs.filters.yearMax,
+    cmcMin: fs.filters.cmcMin,
+    cmcMax: fs.filters.cmcMax,
     priceMin: fs.filters.priceMin,
     priceMax: fs.filters.priceMax,
     colors: fs.filters.colors,
@@ -279,14 +310,13 @@ export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
     headerSortSetCode: fs.sort.headerPriceSetCode,
     heatmapColumnLayout: fs.display.heatmapColumnLayout,
     cellPriceField: fs.display.cellPriceField,
+    quickPinRows: [...fs.filters.quickPinRows],
+    quickPinCols: [...fs.filters.quickPinCols],
   };
 }
 
 export function heatmapFiltersToFilterState(f: HeatmapFilters): FilterState {
-  const slots =
-    f.sortSlots?.length && f.sortSlots.length > 0
-      ? f.sortSlots.slice(0, 3)
-      : parseSortSlotsFromUrl(new URLSearchParams({ sort: f.sort }));
+  const slots = effectiveSortSlots(f).slice(0, 3);
   return {
     filters: {
       rarity: [...f.rarity],
@@ -296,6 +326,8 @@ export function heatmapFiltersToFilterState(f: HeatmapFilters): FilterState {
       excludeGroups: [...f.excludeGroups],
       yearMin: f.yearMin,
       yearMax: f.yearMax,
+      cmcMin: f.cmcMin,
+      cmcMax: f.cmcMax,
       priceMin: f.priceMin,
       priceMax: f.priceMax,
       colors: [...f.colors],
@@ -308,6 +340,8 @@ export function heatmapFiltersToFilterState(f: HeatmapFilters): FilterState {
       includeDigital: f.includeDigital,
       specialGroup: f.specialGroup,
       search: f.search,
+      quickPinRows: [...f.quickPinRows],
+      quickPinCols: [...f.quickPinCols],
     },
     display: {
       showEmptyColumns: f.showEmptyColumns,

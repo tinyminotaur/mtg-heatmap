@@ -22,6 +22,9 @@ type Props = {
   onOpenFilters: () => void;
   onOpenHelp: () => void;
   onApplySearch: (q: string) => void;
+  /** When set (heatmap shell), open overlays instead of routing to full pages. */
+  onNavigateOwned?: () => void;
+  onNavigateWishlist?: () => void;
 };
 
 export function HeatmapCommandPalette({
@@ -30,6 +33,8 @@ export function HeatmapCommandPalette({
   onOpenFilters,
   onOpenHelp,
   onApplySearch,
+  onNavigateOwned,
+  onNavigateWishlist,
 }: Props) {
   const router = useRouter();
   const [hits, setHits] = useState<CardHit[]>([]);
@@ -79,7 +84,8 @@ export function HeatmapCommandPalette({
             <CommandItem
               onSelect={() => {
                 onOpenChange(false);
-                router.push("/owned");
+                if (onNavigateOwned) onNavigateOwned();
+                else router.push("/owned");
               }}
             >
               Owned list
@@ -88,7 +94,8 @@ export function HeatmapCommandPalette({
             <CommandItem
               onSelect={() => {
                 onOpenChange(false);
-                router.push("/watchlist");
+                if (onNavigateWishlist) onNavigateWishlist();
+                else router.push("/watchlist");
               }}
             >
               Watchlist

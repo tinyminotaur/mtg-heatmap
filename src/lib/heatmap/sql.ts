@@ -68,6 +68,14 @@ export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unkno
     );
     params.push(f.specialGroup);
   }
+  if (f.cmcMin != null) {
+    parts.push(`COALESCE(c.cmc, 0) >= ?`);
+    params.push(f.cmcMin);
+  }
+  if (f.cmcMax != null) {
+    parts.push(`COALESCE(c.cmc, 0) <= ?`);
+    params.push(f.cmcMax);
+  }
   return { sql: parts.join(" AND "), params };
 }
 

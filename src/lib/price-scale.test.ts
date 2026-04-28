@@ -68,7 +68,8 @@ describe("formatHeatmapCellPriceLabel", () => {
   });
 
   it("formats usd / foil / eur / tix", () => {
-    expect(formatHeatmapCellPriceLabel({ usd: 4.5, usd_foil: null, eur: null, tix: null }, "usd")).toBe("$4.5");
+    expect(formatHeatmapCellPriceLabel({ usd: 4.5, usd_foil: null, eur: null, tix: null }, "usd")).toBe("$4.50");
+    expect(formatHeatmapCellPriceLabel({ usd: 12.2, usd_foil: null, eur: null, tix: null }, "usd")).toBe("$13");
     expect(
       formatHeatmapCellPriceLabel({ usd: null, usd_foil: 12, eur: null, tix: null }, "usd_foil"),
     ).toBe("$12");

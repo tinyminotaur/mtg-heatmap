@@ -26,7 +26,7 @@ import {
 } from "@/lib/heatmap/sql";
 import {
   buildValueLayoutCells,
-  printingMatchesCell,
+  printingMatchesForDisplay,
 } from "@/lib/heatmap/value-layout";
 
 export type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
@@ -190,6 +190,7 @@ function valueLayoutColumnMetas(): ColumnMeta[] {
       set_type: "aggregate",
       icon_svg_path: null,
       year: null,
+      parent_set_code: null,
     },
     {
       code: "__med__",
@@ -198,6 +199,7 @@ function valueLayoutColumnMetas(): ColumnMeta[] {
       set_type: "aggregate",
       icon_svg_path: null,
       year: null,
+      parent_set_code: null,
     },
     {
       code: "__max__",
@@ -206,6 +208,7 @@ function valueLayoutColumnMetas(): ColumnMeta[] {
       set_type: "aggregate",
       icon_svg_path: null,
       year: null,
+      parent_set_code: null,
     },
   ];
 }
@@ -233,7 +236,14 @@ export function getHeatmapData(
   );
   const physicalSetCodes = physicalColumns.map((c) => c.code);
   const valueLayout = fx.heatmapColumnLayout === "value" && physicalSetCodes.length > 0;
-  const heatmapColumns = valueLayout ? valueLayoutColumnMetas() : physicalColumns;
+  const pinRowSet = new Set(fx.quickPinRows);
+  const pinColSet = new Set(fx.quickPinCols.map((c) => c.toLowerCase()));
+  const heatmapColumns = valueLayout
+    ? valueLayoutColumnMetas()
+    : physicalColumns.map((c) => ({
+        ...c,
+        quick_pin_column: pinColSet.has(c.code.toLowerCase()),
+      }));
 
   const { sql: havingSql, params: havingParams } = buildHaving(fx, userId, {
     priceSetCodes: physicalSetCodes,
@@ -243,11 +253,34 @@ export function getHeatmapData(
   const whereTail = `${havingSql} ${gc.sql}${visPrint.sql}`;
   const whereParams = [...havingParams, ...gc.params, ...visPrint.params];
 
-  const countSql = `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${whereTail}`;
-  const total = (db.prepare(countSql).get(...cardParams, ...whereParams) as { n: number }).n;
+  const countSql =
+    fx.quickPinRows.length > 0
+      ? `SELECT COUNT(*) AS n FROM cards c WHERE ((${cardPred} ${whereTail})) OR ((c.oracle_id IN (${fx.quickPinRows.map(() => "?").join(",")})) ${whereTail}))`
+      : `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${whereTail}`;
+  const countParams =
+    fx.quickPinRows.length > 0
+      ? [...cardParams, ...whereParams, ...fx.quickPinRows, ...whereParams]
+      : [...cardParams, ...whereParams];
+  const total = (db.prepare(countSql).get(...countParams) as { n: number }).n;
 
   const gSelect = gexpr ? `, (${gexpr}) AS _gk` : ", NULL AS _gk";
   const ordering = buildRowOrdering(fx, physicalSetCodes, gexpr);
+
+  const qpPh = fx.quickPinRows.map(() => "?").join(",");
+  const quickPinRowsData =
+    fx.quickPinRows.length > 0
+      ? (db
+          .prepare(
+            `SELECT c.* ${gSelect}${ordering.select} FROM cards c
+             WHERE c.oracle_id IN (${qpPh}) ${whereTail}`,
+          )
+          .all(...ordering.params, ...fx.quickPinRows, ...whereParams) as Record<string, unknown>[])
+      : [];
+  const qOrder = new Map(fx.quickPinRows.map((id, i) => [id, i]));
+  quickPinRowsData.sort(
+    (a, b) =>
+      (qOrder.get(a.oracle_id as string) ?? 999) - (qOrder.get(b.oracle_id as string) ?? 999),
+  );
 
   const pinnedRows: Record<string, unknown>[] = fx.showPinned
     ? (db
@@ -261,25 +294,49 @@ export function getHeatmapData(
     : [];
 
   const offset = fx.page * fx.pageSize;
+  const quickPageEx =
+    fx.quickPinRows.length > 0
+      ? ` AND c.oracle_id NOT IN (${fx.quickPinRows.map(() => "?").join(",")}) `
+      : "";
   const pageRows = db
     .prepare(
       `SELECT c.* ${gSelect}${ordering.select} FROM cards c
-     WHERE ${cardPred} ${whereTail}
+     WHERE ${cardPred} ${whereTail}${quickPageEx}
      ORDER BY ${ordering.orderBy}
      LIMIT ? OFFSET ?`,
     )
-    .all(...ordering.params, ...cardParams, ...whereParams, fx.pageSize, offset) as Record<string, unknown>[];
+    .all(
+      ...ordering.params,
+      ...cardParams,
+      ...whereParams,
+      ...(fx.quickPinRows.length ? fx.quickPinRows : []),
+      fx.pageSize,
+      offset,
+    ) as Record<string, unknown>[];
 
-  const pinnedIds = new Set(pinnedRows.map((r) => r.oracle_id as string));
   const merged: Record<string, unknown>[] = [];
+  const seenOracle = new Set<string>();
   if (fx.showPinned) {
     for (const r of pinnedRows) {
-      if (!merged.find((m) => m.oracle_id === r.oracle_id)) merged.push(r);
+      const id = r.oracle_id as string;
+      if (!seenOracle.has(id)) {
+        merged.push(r);
+        seenOracle.add(id);
+      }
+    }
+  }
+  for (const r of quickPinRowsData) {
+    const id = r.oracle_id as string;
+    if (!seenOracle.has(id)) {
+      merged.push(r);
+      seenOracle.add(id);
     }
   }
   for (const r of pageRows) {
-    if (fx.showPinned && pinnedIds.has(r.oracle_id as string)) continue;
+    const id = r.oracle_id as string;
+    if (seenOracle.has(id)) continue;
     merged.push(r);
+    seenOracle.add(id);
   }
 
   const oracleIds = merged.map((r) => r.oracle_id as string);
@@ -370,13 +427,26 @@ export function getHeatmapData(
           fx.cellPriceField ?? "usd",
           ownedMap,
           wl,
+          oid,
+          pinRowSet,
+          pinColSet,
         )
       : physicalSetCodes.map((code) => {
           const p = pmap.get(code);
           if (!p) return null;
           const oq = ownedMap.get(p.scryfall_id) ?? 0;
           const wlisted = wl.has(p.scryfall_id);
-          const pm = printingMatchesCell(fx, code, p, priceSetsForCells, oq, wlisted);
+          const pm = printingMatchesForDisplay(
+            fx,
+            oid,
+            code,
+            p,
+            priceSetsForCells,
+            oq,
+            wlisted,
+            pinRowSet,
+            pinColSet,
+          );
           return {
             scryfall_id: p.scryfall_id,
             usd: p.usd,
@@ -436,9 +506,18 @@ export function getHeatmapData(
     const group_key =
       typeof gkRaw === "string" || typeof gkRaw === "number" ? String(gkRaw) : fx.groupBy === "none" ? null : null;
 
+    const rawCmc = card.cmc;
+    const cmc =
+      typeof rawCmc === "number"
+        ? rawCmc
+        : rawCmc != null && String(rawCmc).trim() !== ""
+          ? Number(rawCmc)
+          : null;
+
     return {
       oracle_id: oid,
       name: card.name as string,
+      cmc: Number.isFinite(cmc as number) ? (cmc as number) : null,
       mana_cost: (card.mana_cost as string) ?? null,
       colors: safeJsonArray(card.colors),
       color_identity: safeJsonArray(card.color_identity),
@@ -450,6 +529,7 @@ export function getHeatmapData(
       owned_qty,
       watchlisted,
       pinned: pin.has(oid),
+      quick_pin_row: pinRowSet.has(oid),
       price_low_cols,
       price_high_cols,
       group_key: fx.groupBy === "none" ? null : group_key,

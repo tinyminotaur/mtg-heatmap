@@ -17,7 +17,7 @@ function cellPrice(cell: NonNullable<RowDTO["cells"][number]>): number | null {
 
 /**
  * When the row has at least two visible priced printings and min < max, returns column indices and amounts.
- * Otherwise null (no “Lowest” / “Highest” badges or callout).
+ * Otherwise null (no “Min” / “Max” badges or callout).
  */
 export function getHeatmapPriceRange(row: RowDTO | undefined): HeatmapPriceRange | null {
   if (!row?.price_low_cols.length && !row?.price_high_cols.length) return null;

@@ -123,6 +123,9 @@ describe("buildValueLayoutCells", () => {
       "usd",
       new Map(),
       new Set(),
+      "oracle-x",
+      new Set(),
+      new Set(),
     );
     expect(cells).toEqual([null, null, null]);
   });
@@ -147,6 +150,9 @@ describe("buildValueLayoutCells", () => {
       f,
       "usd",
       new Map(),
+      new Set(),
+      "oracle-x",
+      new Set(),
       new Set(),
     );
 

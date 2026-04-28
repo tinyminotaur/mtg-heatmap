@@ -1,5 +1,5 @@
 import type { HeatmapFilters } from "@/lib/filter-state";
-import { defaultHeatmapFilters } from "@/lib/filter-state";
+import { defaultHeatmapFilters, effectiveSortSlots } from "@/lib/filter-state";
 
 export function safeJsonArray(raw: unknown): string[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
@@ -31,10 +31,9 @@ export function normalizeFilters(f: HeatmapFilters): HeatmapFilters {
   return {
     ...defaultHeatmapFilters,
     ...f,
-    sortSlots:
-      f.sortSlots?.length && f.sortSlots.length > 0
-        ? f.sortSlots
-        : [{ key: "name", dir: null }],
+    sortSlots: effectiveSortSlots(f),
+    quickPinRows: [...new Set(f.quickPinRows ?? [])].slice(0, 48),
+    quickPinCols: [...new Set((f.quickPinCols ?? []).map((x) => x.trim().toLowerCase()))].filter(Boolean).slice(0, 36),
   };
 }
 

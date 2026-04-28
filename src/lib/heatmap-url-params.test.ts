@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultHeatmapFilters } from "@/lib/filter-state";
+import { type HeatmapFilters, defaultHeatmapFilters } from "@/lib/filter-state";
 import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
 
 describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", () => {
@@ -7,11 +7,15 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     const a = new URLSearchParams();
     a.set("yearMin", "1993");
     a.set("yearMax", "2005");
+    a.set("cmcMin", "2");
+    a.set("cmcMax", "5");
     a.set("priceMin", "1");
     a.set("priceMax", "50");
     const f = parseHeatmapUrlSearchParams(a);
     expect(f.yearMin).toBe(1993);
     expect(f.yearMax).toBe(2005);
+    expect(f.cmcMin).toBe(2);
+    expect(f.cmcMax).toBe(5);
     expect(f.priceMin).toBe(1);
     expect(f.priceMax).toBe(50);
     const b = serializeHeatmapUrlParams(f);
@@ -99,5 +103,32 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     const f2 = parseHeatmapUrlSearchParams(sp);
     expect(f2.heatmapColumnLayout).toBe("value");
     expect(f2.cellPriceField).toBe("eur");
+  });
+
+  it("round-trips session quick-pin rows and columns (qr / qc)", () => {
+    const f = {
+      ...defaultHeatmapFilters,
+      quickPinRows: ["abc-oracle", "def-oracle"],
+      quickPinCols: ["lea", "mmq"],
+    };
+    const sp = serializeHeatmapUrlParams(f as HeatmapFilters);
+    expect(sp.get("qr")).toBe("abc-oracle,def-oracle");
+    expect(sp.get("qc")).toBe("lea,mmq");
+    const again = parseHeatmapUrlSearchParams(sp);
+    expect(again.quickPinRows).toEqual(["abc-oracle", "def-oracle"]);
+    expect(again.quickPinCols).toEqual(["lea", "mmq"]);
+  });
+
+  it("serializes row sort from legacy sort when sortSlots were cleared (merged partial state)", () => {
+    const f = {
+      ...defaultHeatmapFilters,
+      sortSlots: [],
+      sort: "price_min:asc",
+    };
+    const sp = serializeHeatmapUrlParams(f as HeatmapFilters);
+    expect(sp.get("sk")).toBe("price_min:asc");
+    const again = parseHeatmapUrlSearchParams(sp);
+    expect(again.sortSlots[0]?.key).toBe("price_min");
+    expect(again.sortSlots[0]?.dir).toBe("asc");
   });
 });

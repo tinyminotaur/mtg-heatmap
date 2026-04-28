@@ -42,18 +42,47 @@ export function printingMatchesCell(
   return true;
 }
 
+/** Respects session quick-pin row/column overrides (cells stay “full strength” vs printing-level filters). */
+export function printingMatchesForDisplay(
+  fx: HeatmapFilters,
+  oracleId: string,
+  setCode: string,
+  p: { rarity: string | null; usd: number | null; usd_foil: number | null; scryfall_id: string },
+  priceSets: string[],
+  ownedQty: number,
+  watchlisted: boolean,
+  pinRowSet: Set<string>,
+  pinColSet: Set<string>,
+): boolean {
+  if (pinRowSet.has(oracleId) || pinColSet.has(setCode.toLowerCase())) return true;
+  return printingMatchesCell(fx, setCode, p, priceSets, ownedQty, watchlisted);
+}
+
 export function printingToCellDto(
   p: PrintingRow,
   fx: HeatmapFilters,
+  oracleId: string,
   setCode: string,
   priceSetsForCells: string[],
   ownedMap: Map<string, number>,
   wl: Set<string>,
+  pinRowSet: Set<string>,
+  pinColSet: Set<string>,
   extra: Pick<CellDTO, "display_price" | "source_set_code" | "source_set_name" | "aggregate_note">,
 ): CellDTO {
   const oq = ownedMap.get(p.scryfall_id) ?? 0;
   const wlisted = wl.has(p.scryfall_id);
-  const pm = printingMatchesCell(fx, setCode, p, priceSetsForCells, oq, wlisted);
+  const pm = printingMatchesForDisplay(
+    fx,
+    oracleId,
+    setCode,
+    p,
+    priceSetsForCells,
+    oq,
+    wlisted,
+    pinRowSet,
+    pinColSet,
+  );
   return {
     scryfall_id: p.scryfall_id,
     usd: p.usd,
@@ -82,6 +111,9 @@ export function buildValueLayoutCells(
   field: PriceMode,
   ownedMap: Map<string, number>,
   wl: Set<string>,
+  oracleId: string,
+  pinRowSet: Set<string>,
+  pinColSet: Set<string>,
 ): (CellDTO | null)[] {
   type E = { v: number; code: string; p: PrintingRow };
   const entries: E[] = [];
@@ -99,7 +131,8 @@ export function buildValueLayoutCells(
     if (v == null || !(v > 0)) continue;
     const oq = ownedMap.get(p.scryfall_id) ?? 0;
     const wlisted = wl.has(p.scryfall_id);
-    if (!printingMatchesCell(fx, code, p, physicalSetCodes, oq, wlisted)) continue;
+    if (!printingMatchesForDisplay(fx, oracleId, code, p, physicalSetCodes, oq, wlisted, pinRowSet, pinColSet))
+      continue;
     entries.push({ v, code, p });
   }
   entries.sort((a, b) => a.v - b.v || a.code.localeCompare(b.code));
@@ -125,19 +158,19 @@ export function buildValueLayoutCells(
   }
 
   const priceSets = physicalSetCodes;
-  const minCell = printingToCellDto(minE.p, fx, minE.code, priceSets, ownedMap, wl, {
+  const minCell = printingToCellDto(minE.p, fx, oracleId, minE.code, priceSets, ownedMap, wl, pinRowSet, pinColSet, {
     display_price: minE.v,
     source_set_code: minE.code,
     source_set_name: setDisplayName(minE.code),
     aggregate_note: null,
   });
-  const maxCell = printingToCellDto(maxE.p, fx, maxE.code, priceSets, ownedMap, wl, {
+  const maxCell = printingToCellDto(maxE.p, fx, oracleId, maxE.code, priceSets, ownedMap, wl, pinRowSet, pinColSet, {
     display_price: maxE.v,
     source_set_code: maxE.code,
     source_set_name: setDisplayName(maxE.code),
     aggregate_note: null,
   });
-  const medCell = printingToCellDto(medPrimary.p, fx, medPrimary.code, priceSets, ownedMap, wl, {
+  const medCell = printingToCellDto(medPrimary.p, fx, oracleId, medPrimary.code, priceSets, ownedMap, wl, pinRowSet, pinColSet, {
     display_price: median,
     source_set_code: medPrimary.code,
     source_set_name: setDisplayName(medPrimary.code),

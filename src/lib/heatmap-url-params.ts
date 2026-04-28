@@ -7,13 +7,10 @@ import {
   type HeatmapFilters,
   type HeatmapColumnLayout,
   defaultHeatmapFilters,
+  effectiveSortSlots,
   parseSortSlotsFromUrl,
   slotsToPrimarySortString,
 } from "@/lib/filter-state";
-
-function normalizedSortSlots(f: HeatmapFilters) {
-  return f.sortSlots?.length ? f.sortSlots : defaultHeatmapFilters.sortSlots;
-}
 
 /** Allowed URL param values for controlled Selects (invalid → safe default). */
 export const COL_SORT_OPTIONS = ["release", "release_desc", "code", "name", "type_release"] as const;
@@ -117,6 +114,8 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
   const types = merged.get("types")?.split(",").filter(Boolean) ?? [];
   const yearMin = merged.get("yearMin") ? Number(merged.get("yearMin")) : null;
   const yearMax = merged.get("yearMax") ? Number(merged.get("yearMax")) : null;
+  const cmcMin = merged.get("cmcMin") ? Number(merged.get("cmcMin")) : null;
+  const cmcMax = merged.get("cmcMax") ? Number(merged.get("cmcMax")) : null;
   const priceMin = merged.get("priceMin") ? Number(merged.get("priceMin")) : null;
   const priceMax = merged.get("priceMax") ? Number(merged.get("priceMax")) : null;
   const parseBool = (k: string): boolean | null => {
@@ -153,6 +152,8 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     types,
     yearMin: Number.isFinite(yearMin as number) ? yearMin : null,
     yearMax: Number.isFinite(yearMax as number) ? yearMax : null,
+    cmcMin: Number.isFinite(cmcMin as number) ? cmcMin : null,
+    cmcMax: Number.isFinite(cmcMax as number) ? cmcMax : null,
     priceMin: Number.isFinite(priceMin as number) ? priceMin : null,
     priceMax: Number.isFinite(priceMax as number) ? priceMax : null,
     owned: parseBool("owned"),
@@ -179,7 +180,23 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     headerSortSetCode: merged.get("hcol")?.trim().toLowerCase() || null,
     heatmapColumnLayout: (merged.get("hlay") === "value" ? "value" : "sets") as HeatmapColumnLayout,
     cellPriceField: parseHeatmapCellPriceField(merged),
+    quickPinRows: parseQuickPinRows(merged),
+    quickPinCols: parseQuickPinCols(merged),
   };
+}
+
+const QUICK_PIN_ROWS_MAX = 48;
+const QUICK_PIN_COLS_MAX = 36;
+
+function parseQuickPinRows(sp: URLSearchParams): string[] {
+  const raw = sp.get("qr")?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+  return [...new Set(raw)].slice(0, QUICK_PIN_ROWS_MAX);
+}
+
+function parseQuickPinCols(sp: URLSearchParams): string[] {
+  const raw =
+    sp.get("qc")?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) ?? [];
+  return [...new Set(raw)].slice(0, QUICK_PIN_COLS_MAX);
 }
 
 function setIf(out: URLSearchParams, key: string, val: string | null | undefined, omit?: string) {
@@ -201,6 +218,8 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.types.length) out.set("types", f.types.join(","));
   if (f.yearMin != null) out.set("yearMin", String(f.yearMin));
   if (f.yearMax != null) out.set("yearMax", String(f.yearMax));
+  if (f.cmcMin != null) out.set("cmcMin", String(f.cmcMin));
+  if (f.cmcMax != null) out.set("cmcMax", String(f.cmcMax));
   if (f.priceMin != null) out.set("priceMin", String(f.priceMin));
   if (f.priceMax != null) out.set("priceMax", String(f.priceMax));
   if (f.owned === true) out.set("owned", "1");
@@ -227,22 +246,33 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   // Always write `hlay` so it overrides any `s=` blob defaults.
   out.set("hlay", f.heatmapColumnLayout === "value" ? "value" : "sets");
   if (f.cellPriceField !== "usd") out.set("pm", f.cellPriceField);
+  if (f.quickPinRows.length) out.set("qr", f.quickPinRows.join(","));
+  if (f.quickPinCols.length) out.set("qc", f.quickPinCols.join(","));
 
-  const skStr = normalizedSortSlots(f)
-    .slice(0, 3)
+  const rowSortSlots = effectiveSortSlots(f).slice(0, 3);
+  const skStr = rowSortSlots
     .map((s) =>
       s.key.startsWith("price_") ? `${s.key}:${s.dir ?? (s.key === "price_min" ? "asc" : "desc")}` : s.key,
     )
     .join("~");
   if (skStr !== "name") out.set("sk", skStr);
-  setIf(out, "sort", slotsToPrimarySortString(normalizedSortSlots(f)), "name");
+  setIf(out, "sort", slotsToPrimarySortString(rowSortSlots), "name");
 
   let str = out.toString();
   if (str.length > 2000) {
     const overflow: Record<string, unknown> = {};
     for (const [k, v] of out.entries()) {
       if (k === "s") continue;
-      if (v.length > 80 || k === "rarity" || k === "sets" || k === "hideSets" || k === "sk") overflow[k] = v;
+      if (
+        v.length > 80 ||
+        k === "rarity" ||
+        k === "sets" ||
+        k === "hideSets" ||
+        k === "sk" ||
+        k === "qr" ||
+        k === "qc"
+      )
+        overflow[k] = v;
     }
     const compact = new URLSearchParams();
     for (const [k, v] of out.entries()) {

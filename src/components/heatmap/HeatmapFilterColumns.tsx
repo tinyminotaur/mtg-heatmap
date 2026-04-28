@@ -10,6 +10,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -201,22 +202,24 @@ export function HeatmapFilterColumns({
             Column groups · {groupBadges}
           </DropdownMenuTrigger>
           <DropdownMenuContent className="max-h-[min(70vh,28rem)] w-[min(calc(100vw-2rem),22rem)] overflow-y-auto p-1" align="start">
-            <DropdownMenuLabel className="text-xs leading-snug font-normal text-muted-foreground">
-              Exclude whole release groups from column list (not row filters).
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {(data?.groups ?? []).map((g) => (
-              <DropdownMenuCheckboxItem
-                key={g.id}
-                checked={excludeGroups.includes(g.id)}
-                onCheckedChange={() => toggleGroup(g.id)}
-              >
-                <span className="flex flex-col gap-0.5">
-                  <span>{g.label}</span>
-                  <span className="text-[11px] font-normal text-muted-foreground">{g.description}</span>
-                </span>
-              </DropdownMenuCheckboxItem>
-            ))}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs leading-snug font-normal text-muted-foreground">
+                Exclude whole release groups from column list (not row filters).
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {(data?.groups ?? []).map((g) => (
+                <DropdownMenuCheckboxItem
+                  key={g.id}
+                  checked={excludeGroups.includes(g.id)}
+                  onCheckedChange={() => toggleGroup(g.id)}
+                >
+                  <span className="flex flex-col gap-0.5">
+                    <span>{g.label}</span>
+                    <span className="text-[11px] font-normal text-muted-foreground">{g.description}</span>
+                  </span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -230,24 +233,26 @@ export function HeatmapFilterColumns({
             Set types · {typeBadges}
           </DropdownMenuTrigger>
           <DropdownMenuContent className="max-h-[min(70vh,28rem)] w-56 overflow-y-auto" align="start">
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-              Exclude columns by Scryfall set_type
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {isLoading ? (
-              <p className="px-2 py-2 text-xs text-muted-foreground">Loading…</p>
-            ) : (
-              (data?.setTypes ?? []).map((t) => (
-                <DropdownMenuCheckboxItem
-                  key={t}
-                  checked={excludeTypes.includes(t)}
-                  onCheckedChange={() => toggleType(t)}
-                  className="font-mono text-xs"
-                >
-                  {t}
-                </DropdownMenuCheckboxItem>
-              ))
-            )}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Exclude columns by Scryfall set_type
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {isLoading ? (
+                <p className="px-2 py-2 text-xs text-muted-foreground">Loading…</p>
+              ) : (
+                (data?.setTypes ?? []).map((t) => (
+                  <DropdownMenuCheckboxItem
+                    key={t}
+                    checked={excludeTypes.includes(t)}
+                    onCheckedChange={() => toggleType(t)}
+                    className="font-mono text-xs"
+                  >
+                    {t}
+                  </DropdownMenuCheckboxItem>
+                ))
+              )}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

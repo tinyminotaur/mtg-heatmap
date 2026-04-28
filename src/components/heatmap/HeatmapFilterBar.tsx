@@ -19,6 +19,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -26,11 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { ColumnMeta } from "@/lib/heatmap-query";
 import type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
-import {
-  defaultHeatmapFilters,
-  heatmapFiltersToFilterState,
-  filterStateToHeatmapFilters,
-} from "@/lib/filter-state";
+import { defaultHeatmapFilters, slotsToPrimarySortString } from "@/lib/filter-state";
 import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
 import {
   deleteSavedView,
@@ -43,7 +40,6 @@ import {
 import { HEATMAP_FILTER_TIPS } from "@/lib/heatmap-filter-tips";
 import { cn } from "@/lib/utils";
 import { HeatmapFilterColumns } from "./HeatmapFilterColumns";
-import { HeatmapCardSearch } from "./HeatmapCardSearch";
 import { FilterFieldTip } from "./FilterFieldTip";
 
 export type ViewSessionMeta = { activeViewId: string | null; snapshotQuery: string | null };
@@ -64,6 +60,9 @@ type Props = {
   onOpenCommandPalette: () => void;
   onOpenKeyboardHelp: () => void;
   onPersistNav?: () => void;
+  /** Open collection overlays instead of navigating away (heatmap shell). */
+  onOpenOwnedPanel?: () => void;
+  onOpenWishlistPanel?: () => void;
 };
 
 function filtersFromQuery(qs: string): HeatmapFilters {
@@ -97,6 +96,8 @@ export function HeatmapFilterBar({
   onOpenCommandPalette,
   onOpenKeyboardHelp,
   onPersistNav,
+  onOpenOwnedPanel,
+  onOpenWishlistPanel,
 }: Props) {
   const router = useRouter();
   const f = useMemo(() => filtersFromQuery(queryString), [queryString]);
@@ -188,11 +189,13 @@ export function HeatmapFilterBar({
   );
 
   const setSortSlots = (slots: SortSlot[]) => {
-    patch((b) => {
-      const fs = heatmapFiltersToFilterState(b);
-      fs.sort.slots = slots.slice(0, 3);
-      return filterStateToHeatmapFilters(fs);
-    });
+    const next = slots.slice(0, 3);
+    const resolved: SortSlot[] = next.length ? next : [{ key: "name", dir: null }];
+    patch((b) => ({
+      ...b,
+      sortSlots: resolved,
+      sort: slotsToPrimarySortString(resolved),
+    }));
   };
 
   const primarySort = f.sortSlots[0] ?? { key: "name" as const, dir: null };
@@ -309,23 +312,26 @@ export function HeatmapFilterBar({
                 <DropdownMenuSeparator />
               </>
             ) : null}
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">New saved view</DropdownMenuLabel>
-            <div className="flex gap-2 px-2 pb-2">
-              <Input
-                placeholder="Name"
-                className="h-8 text-xs"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-              <Button type="button" size="sm" className="h-8 shrink-0 text-xs" onClick={createView}>
-                Save as…
-              </Button>
-            </div>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">New saved view</DropdownMenuLabel>
+              <div className="flex gap-2 px-2 pb-2">
+                <Input
+                  placeholder="Name"
+                  className="h-8 text-xs"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+                <Button type="button" size="sm" className="h-8 shrink-0 text-xs" onClick={createView}>
+                  Save as…
+                </Button>
+              </div>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => {
                 onPersistNav?.();
-                router.push("/owned");
+                if (onOpenOwnedPanel) onOpenOwnedPanel();
+                else router.push("/owned");
               }}
             >
               Owned
@@ -333,7 +339,8 @@ export function HeatmapFilterBar({
             <DropdownMenuItem
               onClick={() => {
                 onPersistNav?.();
-                router.push("/watchlist");
+                if (onOpenWishlistPanel) onOpenWishlistPanel();
+                else router.push("/watchlist");
               }}
             >
               Watchlist
@@ -365,54 +372,56 @@ export function HeatmapFilterBar({
                 <DropdownMenuSeparator />
               </>
             ) : null}
-            <DropdownMenuLabel className="text-xs">Display</DropdownMenuLabel>
-            <div className="space-y-2 px-2 pb-2">
-              <div className="space-y-1">
-                <span className="text-[10px] text-muted-foreground">Price field</span>
-                <Select
-                  value={f.cellPriceField}
-                  onValueChange={(v) =>
-                    patch((b) => ({
-                      ...b,
-                      cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
-                    }))
-                  }
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="usd">USD</SelectItem>
-                    <SelectItem value="usd_foil">USD foil</SelectItem>
-                    <SelectItem value="eur">EUR</SelectItem>
-                    <SelectItem value="tix">TIX</SelectItem>
-                  </SelectContent>
-                </Select>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs">Display</DropdownMenuLabel>
+              <div className="space-y-2 px-2 pb-2">
+                <div className="space-y-1">
+                  <span className="text-[10px] text-muted-foreground">Price field</span>
+                  <Select
+                    value={f.cellPriceField}
+                    onValueChange={(v) =>
+                      patch((b) => ({
+                        ...b,
+                        cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="usd">USD</SelectItem>
+                      <SelectItem value="usd_foil">USD foil</SelectItem>
+                      <SelectItem value="eur">EUR</SelectItem>
+                      <SelectItem value="tix">TIX</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] text-muted-foreground">Density</span>
+                  <Select value={density} onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="comfy">Comfy</SelectItem>
+                      <SelectItem value="compact">Compact</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="flex items-center gap-2 text-xs">
+                  <Checkbox
+                    checked={f.matchMode === "strict"}
+                    onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
+                  />
+                  Strict cells
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <Checkbox checked={f.showPinned} onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))} />
+                  Pinned strip
+                </label>
               </div>
-              <div className="space-y-1">
-                <span className="text-[10px] text-muted-foreground">Density</span>
-                <Select value={density} onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="comfy">Comfy</SelectItem>
-                    <SelectItem value="compact">Compact</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox
-                  checked={f.matchMode === "strict"}
-                  onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
-                />
-                Strict cells
-              </label>
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox checked={f.showPinned} onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))} />
-                Pinned strip
-              </label>
-            </div>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -428,10 +437,22 @@ export function HeatmapFilterBar({
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,200px)]">
                 <div className="space-y-3 rounded-md border border-border/70 bg-background/40 p-3">
                   <p className="text-xs font-medium text-muted-foreground">Filter by</p>
-                  <HeatmapCardSearch key={cardSearchMountKey} queryString={queryString} onReplaceQuery={onReplaceQuery} />
+                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetSearch} side="right" className="block w-full">
+                    <span className="block text-xs leading-relaxed text-muted-foreground">
+                      Card name matching uses the{" "}
+                      <span className="font-medium text-foreground">Search cards…</span> field in the top bar — not
+                      duplicated here.
+                    </span>
+                  </FilterFieldTip>
                   <FilterFieldTip tip={HEATMAP_FILTER_TIPS.facetsBadge} side="right">
                     <Badge variant="secondary" className="font-normal">
-                      {f.rarity.length || f.yearMin != null || f.yearMax != null || f.priceMin != null || f.priceMax != null
+                      {f.rarity.length ||
+                      f.yearMin != null ||
+                      f.yearMax != null ||
+                      f.cmcMin != null ||
+                      f.cmcMax != null ||
+                      f.priceMin != null ||
+                      f.priceMax != null
                         ? "Facets on"
                         : "No numeric facets"}
                     </Badge>
@@ -464,6 +485,42 @@ export function HeatmapFilterBar({
                             patch((b) => ({
                               ...b,
                               yearMax: e.target.value === "" ? null : Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    </FilterFieldTip>
+                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetCmc} side="right">
+                      <div className="space-y-1">
+                        <Label className="text-xs">CMC min</Label>
+                        <Input
+                          type="number"
+                          step="0.5"
+                          min={0}
+                          className="h-8 text-xs"
+                          value={f.cmcMin ?? ""}
+                          onChange={(e) =>
+                            patch((b) => ({
+                              ...b,
+                              cmcMin: e.target.value === "" ? null : Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    </FilterFieldTip>
+                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetCmc} side="right">
+                      <div className="space-y-1">
+                        <Label className="text-xs">CMC max</Label>
+                        <Input
+                          type="number"
+                          step="0.5"
+                          min={0}
+                          className="h-8 text-xs"
+                          value={f.cmcMax ?? ""}
+                          onChange={(e) =>
+                            patch((b) => ({
+                              ...b,
+                              cmcMax: e.target.value === "" ? null : Number(e.target.value),
                             }))
                           }
                         />
@@ -512,18 +569,20 @@ export function HeatmapFilterBar({
                         Rarity: {raritySummary}
                       </DropdownMenuTrigger>
                       <DropdownMenuContent className="w-52" align="start">
-                        <DropdownMenuLabel className="text-xs">Rarities (multi)</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
-                        {RARITIES.map((r) => (
-                          <DropdownMenuCheckboxItem
-                            key={r}
-                            checked={f.rarity.includes(r)}
-                            onCheckedChange={() => toggleRarity(r)}
-                            className="capitalize"
-                          >
-                            {r}
-                          </DropdownMenuCheckboxItem>
-                        ))}
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-xs">Rarities (multi)</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          {RARITIES.map((r) => (
+                            <DropdownMenuCheckboxItem
+                              key={r}
+                              checked={f.rarity.includes(r)}
+                              onCheckedChange={() => toggleRarity(r)}
+                              className="capitalize"
+                            >
+                              {r}
+                            </DropdownMenuCheckboxItem>
+                          ))}
+                        </DropdownMenuGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
                     <DropdownMenu>
@@ -533,38 +592,40 @@ export function HeatmapFilterBar({
                         Row scope{rowOptionsCount ? ` (${rowOptionsCount})` : ""}
                       </DropdownMenuTrigger>
                       <DropdownMenuContent className="w-60" align="start">
-                        <DropdownMenuLabel className="text-xs">Restrict rows</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuCheckboxItem
-                          checked={f.includeDigital}
-                          onCheckedChange={(v) => patch((b) => ({ ...b, includeDigital: Boolean(v) }))}
-                        >
-                          Include digital sets
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                          checked={Boolean(f.reservedOnly)}
-                          onCheckedChange={(v) => patch((b) => ({ ...b, reservedOnly: v ? true : null }))}
-                        >
-                          Reserved List only
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                          checked={f.owned === true}
-                          onCheckedChange={(v) => patch((b) => ({ ...b, owned: v ? true : null }))}
-                        >
-                          Owned only
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                          checked={f.watchlist === true}
-                          onCheckedChange={(v) => patch((b) => ({ ...b, watchlist: v ? true : null }))}
-                        >
-                          Watchlist only
-                        </DropdownMenuCheckboxItem>
-                        <DropdownMenuCheckboxItem
-                          checked={f.pinned === true}
-                          onCheckedChange={(v) => patch((b) => ({ ...b, pinned: v ? true : null }))}
-                        >
-                          Pinned only
-                        </DropdownMenuCheckboxItem>
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-xs">Restrict rows</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuCheckboxItem
+                            checked={f.includeDigital}
+                            onCheckedChange={(v) => patch((b) => ({ ...b, includeDigital: Boolean(v) }))}
+                          >
+                            Include digital sets
+                          </DropdownMenuCheckboxItem>
+                          <DropdownMenuCheckboxItem
+                            checked={Boolean(f.reservedOnly)}
+                            onCheckedChange={(v) => patch((b) => ({ ...b, reservedOnly: v ? true : null }))}
+                          >
+                            Reserved List only
+                          </DropdownMenuCheckboxItem>
+                          <DropdownMenuCheckboxItem
+                            checked={f.owned === true}
+                            onCheckedChange={(v) => patch((b) => ({ ...b, owned: v ? true : null }))}
+                          >
+                            Owned only
+                          </DropdownMenuCheckboxItem>
+                          <DropdownMenuCheckboxItem
+                            checked={f.watchlist === true}
+                            onCheckedChange={(v) => patch((b) => ({ ...b, watchlist: v ? true : null }))}
+                          >
+                            Watchlist only
+                          </DropdownMenuCheckboxItem>
+                          <DropdownMenuCheckboxItem
+                            checked={f.pinned === true}
+                            onCheckedChange={(v) => patch((b) => ({ ...b, pinned: v ? true : null }))}
+                          >
+                            Pinned only
+                          </DropdownMenuCheckboxItem>
+                        </DropdownMenuGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -674,7 +735,12 @@ export function HeatmapFilterBar({
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Sort by column</Label>
                             <Select
-                              value="__none__"
+                              value={
+                                f.headerSortSetCode &&
+                                columns.some((c) => c.code === f.headerSortSetCode)
+                                  ? f.headerSortSetCode
+                                  : "__none__"
+                              }
                               onValueChange={(code) => {
                                 if (code === "__none__") return;
                                 patch((b) => ({ ...b, headerSortSetCode: code }));

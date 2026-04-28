@@ -19,7 +19,10 @@ import {
 } from "@/lib/constants";
 import {
   clientPointToCell,
+  clientPointToHeatmapHover,
   readCellAnchorRectFromInputs,
+  readFrozenBodyRowAnchorRect,
+  readSetHeaderAnchorRect,
   type HeatmapCellAnchorRect,
   visibleGridRange,
 } from "@/lib/heatmap/grid-geometry";
@@ -66,12 +69,28 @@ type Props = {
   onLeaveGrid: () => void;
   /** When the pointer leaves the grid toward this element, do not dismiss hover (card preview). */
   cardPreviewContainerRef?: RefObject<HTMLElement | null>;
+  /** Prefer this when multiple floating preview roots exist (name column, edition header, …). */
+  cardPreviewContains?: (node: EventTarget | Node | null) => boolean;
   /** Fires after scroll/resize redraw so the parent can re-read cell anchors (pinned preview). */
   onViewportChange?: () => void;
   /** Same node as the scroll port (canvas parent); used for “click outside” with pinned preview. */
   interactionPortRef?: RefObject<HTMLDivElement | null>;
   /** §11.5.6 — click a set header to temporarily sort rows by that column’s USD price. */
   onHeaderSetClick?: (setCode: string) => void;
+  /** Hovering the frozen name / identity strip (body rows). */
+  onHoverFrozenRowBody?: (
+    row: number,
+    clientX: number,
+    clientY: number,
+    anchor: HeatmapCellAnchorRect,
+  ) => void;
+  /** Hovering an edition column header (set symbol band). */
+  onHoverEditionHeader?: (
+    col: number,
+    clientX: number,
+    clientY: number,
+    anchor: HeatmapCellAnchorRect,
+  ) => void;
 };
 
 function drawPriceRangeBadge(
@@ -89,8 +108,8 @@ function drawPriceRangeBadge(
   ctx.font = "bold 8px system-ui, sans-serif";
   const tw = ctx.measureText(label).width;
   const pw = Math.ceil(tw + padX * 2);
-  const bx = vx + HEATMAP_COL_WIDTH - pw - 2;
-  const by = vy + HEATMAP_ROW_HEIGHT - ph - 2 - stackIndex * (ph + 3);
+  const bx = vx + 2;
+  const by = vy + 2 + stackIndex * (ph + 3);
   const style =
     variant === "low"
       ? dark
@@ -123,13 +142,14 @@ function drawCellPriceLabel(
   dark: boolean,
   emphasis: boolean,
 ) {
-  /** Top of cell so we do not collide with Lowest/Highest badges (bottom-right). */
-  const x = vx + 3;
-  const y = vy + 3;
-  const maxW = HEATMAP_COL_WIDTH - 6;
+  /** Bottom-right; Min/Max badges use top-left. */
+  const pad = 3;
+  const maxW = HEATMAP_COL_WIDTH - pad * 2;
+  const rightX = vx + HEATMAP_COL_WIDTH - pad;
+  const bottomY = vy + HEATMAP_ROW_HEIGHT - pad;
   ctx.save();
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.textAlign = "right";
   let fontPx = 8;
   for (let i = 0; i < 4; i++) {
     ctx.font = `bold ${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
@@ -141,12 +161,12 @@ function drawCellPriceLabel(
     ctx.lineJoin = "round";
     ctx.miterLimit = 2;
     ctx.strokeStyle = dark ? "rgba(0,0,0,0.62)" : "rgba(255,255,255,0.82)";
-    ctx.strokeText(text, x, y);
+    ctx.strokeText(text, rightX, bottomY);
     ctx.fillStyle = dark ? "#f9fafb" : "#111827";
-    ctx.fillText(text, x, y);
+    ctx.fillText(text, rightX, bottomY);
   } else {
     ctx.fillStyle = dark ? "rgba(156,163,175,0.98)" : "rgba(82,82,91,0.98)";
-    ctx.fillText(text, x, y);
+    ctx.fillText(text, rightX, bottomY);
   }
   ctx.restore();
 }
@@ -165,9 +185,12 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     onHoverCell,
     onLeaveGrid,
     cardPreviewContainerRef,
+    cardPreviewContains,
     onViewportChange,
     interactionPortRef,
     onHeaderSetClick,
+    onHoverFrozenRowBody,
+    onHoverEditionHeader,
   },
   ref,
 ) {
@@ -180,6 +203,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   const [setIconsEpoch, setSetIconsEpoch] = useState(0);
   const [manaFontEpoch, setManaFontEpoch] = useState(0);
   const lastHoverWithCellRef = useRef<{ r: number; c: number; cell: CellDTO } | null>(null);
+  const lastHoverAuxRef = useRef<{ kind: "name"; row: number } | { kind: "header"; col: number } | null>(null);
 
   const gridW = columns.length * HEATMAP_COL_WIDTH;
   const gridH = rows.length * HEATMAP_ROW_HEIGHT;
@@ -326,6 +350,14 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillStyle = priceToColor(dto, priceMode, dark);
         ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
         if (cell && !strictHide) {
+          if (row.quick_pin_row) {
+            ctx.fillStyle = dark ? "rgba(245, 158, 11, 0.26)" : "rgba(251, 191, 36, 0.22)";
+            ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
+          }
+          if (columns[c]?.quick_pin_column) {
+            ctx.fillStyle = dark ? "rgba(14, 165, 233, 0.22)" : "rgba(125, 211, 252, 0.28)";
+            ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
+          }
           if (row.pinned) {
             ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.22)" : "rgba(147, 51, 234, 0.16)";
             ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
@@ -351,8 +383,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
           drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null);
           const badges: { label: string; variant: "low" | "high" }[] = [];
-          if (row.price_low_cols.includes(c)) badges.push({ label: "Lowest", variant: "low" });
-          if (row.price_high_cols.includes(c)) badges.push({ label: "Highest", variant: "high" });
+          if (row.price_low_cols.includes(c)) badges.push({ label: "Min", variant: "low" });
+          if (row.price_high_cols.includes(c)) badges.push({ label: "Max", variant: "high" });
           badges.forEach((b, i) => drawPriceRangeBadge(ctx, vx, vy, b.label, b.variant, dark, i));
         }
       }
@@ -398,6 +430,10 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       if (vx >= vw || vx + HEATMAP_COL_WIDTH <= effFrozenColW + effRollupW) continue;
       ctx.fillStyle = headerBg;
       ctx.fillRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
+      if (c.quick_pin_column) {
+        ctx.fillStyle = dark ? "rgba(14, 165, 233, 0.35)" : "rgba(125, 211, 252, 0.45)";
+        ctx.fillRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
+      }
       ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
       ctx.strokeRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
       const isz = 30;
@@ -423,7 +459,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       }
       const icon = setImagesRef.current.get(c.code);
       const ix = vx + (HEATMAP_COL_WIDTH - isz) / 2;
-      if (icon && icon.complete && icon.naturalWidth > 0) {
+      const hasSetIcon = Boolean(icon && icon.complete && icon.naturalWidth > 0);
+      if (hasSetIcon) {
         ctx.save();
         ctx.fillStyle = dark ? "rgba(248, 250, 252, 0.96)" : "rgba(255, 255, 255, 0.98)";
         ctx.beginPath();
@@ -432,7 +469,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.strokeStyle = dark ? "rgba(148, 163, 184, 0.55)" : "rgba(15, 23, 42, 0.12)";
         ctx.lineWidth = 1;
         ctx.stroke();
-        ctx.drawImage(icon, ix, iy, isz, isz);
+        ctx.drawImage(icon!, ix, iy, isz, isz);
         ctx.restore();
       } else {
         ctx.fillStyle = dark ? "#27272a" : "#f4f4f5";
@@ -450,13 +487,13 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillText(c.code.slice(0, 3).toUpperCase(), vx + HEATMAP_COL_WIDTH / 2, iy + isz / 2);
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = fg;
+        ctx.font = "bold 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(c.code.toUpperCase(), vx + HEATMAP_COL_WIDTH / 2, iy + isz + 14);
+        ctx.textAlign = "left";
       }
-      ctx.fillStyle = fg;
-      ctx.font = "bold 11px ui-monospace, SFMono-Regular, Menlo, monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
-      ctx.fillText(c.code.toUpperCase(), vx + HEATMAP_COL_WIDTH / 2, iy + isz + 14);
-      ctx.textAlign = "left";
       ctx.fillStyle = muted;
       ctx.font = "10px ui-monospace, system-ui, sans-serif";
       ctx.textAlign = "center";
@@ -482,6 +519,10 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       if (vy >= vh || vy + HEATMAP_ROW_HEIGHT <= HEATMAP_HEADER_H) continue;
       ctx.fillStyle = rowLabelBg;
       ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
+      if (row.quick_pin_row) {
+        ctx.fillStyle = dark ? "rgba(245, 158, 11, 0.22)" : "rgba(251, 191, 36, 0.18)";
+        ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
+      }
       if (row.pinned) {
         ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.2)" : "rgba(147, 51, 234, 0.14)";
         ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
@@ -650,11 +691,39 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   }, [draw]);
 
   const refreshHoverAfterScroll = useCallback(() => {
-    const h = lastHoverWithCellRef.current;
-    if (!h) return;
     const canvas = canvasRef.current;
     const scrollEl = scrollRef.current;
     if (!canvas || !scrollEl) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const sl = scrollEl.scrollLeft;
+    const st = scrollEl.scrollTop;
+    const aux = lastHoverAuxRef.current;
+    if (aux?.kind === "name") {
+      const anchor = readFrozenBodyRowAnchorRect({
+        canvasRect,
+        scrollLeft: sl,
+        scrollTop: st,
+        row: aux.row,
+        frozenColW: effFrozenColW,
+        rollupW: effRollupW,
+      });
+      onHoverFrozenRowBody?.(aux.row, anchor.left + anchor.width / 2, anchor.top + anchor.height / 2, anchor);
+      return;
+    }
+    if (aux?.kind === "header") {
+      const anchor = readSetHeaderAnchorRect({
+        canvasRect,
+        scrollLeft: sl,
+        scrollTop: st,
+        col: aux.col,
+        frozenColW: effFrozenColW,
+        rollupW: effRollupW,
+      });
+      onHoverEditionHeader?.(aux.col, anchor.left + anchor.width / 2, anchor.top + anchor.height / 2, anchor);
+      return;
+    }
+    const h = lastHoverWithCellRef.current;
+    if (!h) return;
     const cell = rows[h.r]?.cells[h.c] ?? null;
     if (!cellEligibleForHeatmapHoverPreview(cell, matchMode, priceMode)) {
       lastHoverWithCellRef.current = null;
@@ -662,16 +731,26 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       return;
     }
     const a = readCellAnchorRectFromInputs({
-      canvasRect: canvas.getBoundingClientRect(),
-      scrollLeft: scrollEl.scrollLeft,
-      scrollTop: scrollEl.scrollTop,
+      canvasRect,
+      scrollLeft: sl,
+      scrollTop: st,
       row: h.r,
       col: h.c,
       frozenColW: effFrozenColW,
       rollupW: effRollupW,
     });
     onHoverCell(h.r, h.c, cell, a.left + a.width / 2, a.top + a.height / 2, a);
-  }, [rows, matchMode, priceMode, onHoverCell, onLeaveGrid, effFrozenColW, effRollupW]);
+  }, [
+    rows,
+    matchMode,
+    priceMode,
+    onHoverCell,
+    onLeaveGrid,
+    effFrozenColW,
+    effRollupW,
+    onHoverFrozenRowBody,
+    onHoverEditionHeader,
+  ]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -756,7 +835,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     const canvas = canvasRef.current;
     if (!scrollEl || !canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const hit = clientPointToCell({
+    const hoverHit = clientPointToHeatmapHover({
       clientX: e.clientX,
       clientY: e.clientY,
       canvasRect: rect,
@@ -767,12 +846,48 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       frozenColW: effFrozenColW,
       rollupW: effRollupW,
     });
-    if (!hit) {
+    if (!hoverHit) {
       lastHoverWithCellRef.current = null;
+      lastHoverAuxRef.current = null;
       onLeaveGrid();
       return;
     }
-    const cell = rows[hit.row]?.cells[hit.col] ?? null;
+    if (hoverHit.kind === "frozenCorner") {
+      lastHoverWithCellRef.current = null;
+      lastHoverAuxRef.current = null;
+      onLeaveGrid();
+      return;
+    }
+    if (hoverHit.kind === "nameColumn") {
+      lastHoverWithCellRef.current = null;
+      lastHoverAuxRef.current = { kind: "name", row: hoverHit.row };
+      const anchor = readFrozenBodyRowAnchorRect({
+        canvasRect: rect,
+        scrollLeft: scrollEl.scrollLeft,
+        scrollTop: scrollEl.scrollTop,
+        row: hoverHit.row,
+        frozenColW: effFrozenColW,
+        rollupW: effRollupW,
+      });
+      onHoverFrozenRowBody?.(hoverHit.row, e.clientX, e.clientY, anchor);
+      return;
+    }
+    if (hoverHit.kind === "setHeader") {
+      lastHoverWithCellRef.current = null;
+      lastHoverAuxRef.current = { kind: "header", col: hoverHit.col };
+      const anchor = readSetHeaderAnchorRect({
+        canvasRect: rect,
+        scrollLeft: scrollEl.scrollLeft,
+        scrollTop: scrollEl.scrollTop,
+        col: hoverHit.col,
+        frozenColW: effFrozenColW,
+        rollupW: effRollupW,
+      });
+      onHoverEditionHeader?.(hoverHit.col, e.clientX, e.clientY, anchor);
+      return;
+    }
+    lastHoverAuxRef.current = null;
+    const cell = rows[hoverHit.row]?.cells[hoverHit.col] ?? null;
     if (!cellEligibleForHeatmapHoverPreview(cell, matchMode, priceMode)) {
       lastHoverWithCellRef.current = null;
       onLeaveGrid();
@@ -782,13 +897,13 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       canvasRect: rect,
       scrollLeft: scrollEl.scrollLeft,
       scrollTop: scrollEl.scrollTop,
-      row: hit.row,
-      col: hit.col,
+      row: hoverHit.row,
+      col: hoverHit.col,
       frozenColW: effFrozenColW,
       rollupW: effRollupW,
     });
-    lastHoverWithCellRef.current = { r: hit.row, c: hit.col, cell: cell! };
-    onHoverCell(hit.row, hit.col, cell!, e.clientX, e.clientY, anchor);
+    lastHoverWithCellRef.current = { r: hoverHit.row, c: hoverHit.col, cell: cell! };
+    onHoverCell(hoverHit.row, hoverHit.col, cell!, e.clientX, e.clientY, anchor);
   };
 
   const longPressRef = useRef<{
@@ -857,6 +972,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
 
   const onPortMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
     const next = e.relatedTarget;
+    if (next instanceof Node && cardPreviewContains?.(next)) return;
     const previewEl = cardPreviewContainerRef?.current;
     if (previewEl && next instanceof Node && previewEl.contains(next)) return;
     onLeaveGrid();

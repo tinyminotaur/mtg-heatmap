@@ -28,6 +28,8 @@ export type CellDTO = {
 export type RowDTO = {
   oracle_id: string;
   name: string;
+  /** Converted mana cost (oracle). */
+  cmc: number | null;
   mana_cost: string | null;
   colors: string[];
   color_identity: string[];
@@ -40,6 +42,8 @@ export type RowDTO = {
   owned_qty: number;
   watchlisted: boolean;
   pinned: boolean;
+  /** Session quick-pin row (`qr=`); cells ignore printing-level filter dimming. */
+  quick_pin_row: boolean;
   price_low_cols: number[];
   price_high_cols: number[];
   /** Single-level group key for §11.6 UI (null when not grouping). */
