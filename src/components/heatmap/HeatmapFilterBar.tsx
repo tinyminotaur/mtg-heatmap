@@ -178,7 +178,7 @@ export function HeatmapFilterBar({
           <div className="flex items-center gap-1">
             <Input
               placeholder="New view name"
-              className="h-7 w-32 text-xs"
+              className="h-7 w-32 max-w-full text-xs"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />

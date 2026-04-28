@@ -17,6 +17,8 @@ export const HEATMAP_COL_WIDTH = 52;
 export const HEATMAP_IDENTITY_STRIP_W = 22;
 /** Wide enough for strip, name, and mana symbols. */
 export const HEATMAP_FROZEN_COL_W = 308;
+/** Frozen rollup column width for per-row metrics (px). */
+export const HEATMAP_FROZEN_ROLLUP_W = 54;
 /** Fits set symbol + readable set code + year. */
 export const HEATMAP_HEADER_H = 76;
 /** Default and maximum rows per heatmap API page (large JSON payloads can fail on some hosts). */

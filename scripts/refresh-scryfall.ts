@@ -175,111 +175,111 @@ async function main() {
   try {
     db.exec("BEGIN");
     const clear = [
-    "DELETE FROM owned_cards",
-    "DELETE FROM watchlist",
-    "DELETE FROM pinned",
-    "DELETE FROM prices_history",
-    "DELETE FROM prices_current",
-    "DELETE FROM printings",
-    "DELETE FROM cards",
-    "DELETE FROM sets",
-    "DELETE FROM special_groups",
-  ];
-  for (const s of clear) db.exec(s);
+      "DELETE FROM owned_cards",
+      "DELETE FROM watchlist",
+      "DELETE FROM pinned",
+      "DELETE FROM prices_history",
+      "DELETE FROM prices_current",
+      "DELETE FROM printings",
+      "DELETE FROM cards",
+      "DELETE FROM sets",
+      "DELETE FROM special_groups",
+    ];
+    for (const s of clear) db.exec(s);
 
-  const insSet = db.prepare(
-    `INSERT OR REPLACE INTO sets (code, name, release_date, set_type, icon_svg_path, is_digital, is_promo, parent_set_code)
+    const insSet = db.prepare(
+      `INSERT OR REPLACE INTO sets (code, name, release_date, set_type, icon_svg_path, is_digital, is_promo, parent_set_code)
      VALUES (@code,@name,@release_date,@set_type,@icon_svg_path,@is_digital,0,NULL)`,
-  );
-  const insCard = db.prepare(
-    `INSERT OR REPLACE INTO cards (oracle_id, name, mana_cost, cmc, type_line, oracle_text, colors, color_identity, is_reserved, legalities)
+    );
+    const insCard = db.prepare(
+      `INSERT OR REPLACE INTO cards (oracle_id, name, mana_cost, cmc, type_line, oracle_text, colors, color_identity, is_reserved, legalities)
      VALUES (@oracle_id,@name,@mana_cost,@cmc,@type_line,@oracle_text,@colors,@color_identity,@is_reserved,@legalities)`,
-  );
-  const insP = db.prepare(
-    `INSERT OR REPLACE INTO printings (scryfall_id, oracle_id, set_code, collector_number, rarity, released_at, image_uri_large, image_uri_normal, image_uri_small, scryfall_uri, tcgplayer_url, cardmarket_url, is_foil_only, is_nonfoil_only, is_promo, frame_effects, finishes)
+    );
+    const insP = db.prepare(
+      `INSERT OR REPLACE INTO printings (scryfall_id, oracle_id, set_code, collector_number, rarity, released_at, image_uri_large, image_uri_normal, image_uri_small, scryfall_uri, tcgplayer_url, cardmarket_url, is_foil_only, is_nonfoil_only, is_promo, frame_effects, finishes)
      VALUES (@scryfall_id,@oracle_id,@set_code,@collector_number,@rarity,@released_at,@image_uri_large,@image_uri_normal,@image_uri_small,@scryfall_uri,@tcgplayer_url,@cardmarket_url,@is_foil_only,@is_nonfoil_only,@is_promo,@frame_effects,@finishes)`,
-  );
-  const insPrice = db.prepare(
-    `INSERT OR REPLACE INTO prices_current (scryfall_id, usd, usd_foil, usd_etched, eur, eur_foil, tix, updated_at)
+    );
+    const insPrice = db.prepare(
+      `INSERT OR REPLACE INTO prices_current (scryfall_id, usd, usd_foil, usd_etched, eur, eur_foil, tix, updated_at)
      VALUES (@scryfall_id,@usd,@usd_foil,NULL,@eur,NULL,@tix,datetime('now'))`,
-  );
+    );
 
     const seenSets = new Set<string>();
     const readStream = fs.createReadStream(tmp);
     const pipelineChain = chain([readStream, parser(), streamArray()]);
 
     for await (const chunk of pipelineChain) {
-    const card = (chunk as { value: ScryfallCard }).value;
-    if (!card || card.object !== "card") continue;
-    const layout = (card as { layout?: string }).layout;
-    if (layout === "token" || layout === "double_faced_token" || layout === "emblem") continue;
-    if (!passesPoc(card)) continue;
-    const setInfo = resolveSet(card);
-    if (!setInfo) continue;
-    if (card.digital || setInfo.digital) continue;
+      const card = (chunk as { value: ScryfallCard }).value;
+      if (!card || card.object !== "card") continue;
+      const layout = (card as { layout?: string }).layout;
+      if (layout === "token" || layout === "double_faced_token" || layout === "emblem") continue;
+      if (!passesPoc(card)) continue;
+      const setInfo = resolveSet(card);
+      if (!setInfo) continue;
+      if (card.digital || setInfo.digital) continue;
 
-    const setCode = setInfo.code;
-    if (!seenSets.has(setCode)) {
-      seenSets.add(setCode);
-      insSet.run({
-        code: setCode,
-        name: setInfo.name,
-        release_date: setInfo.released_at ?? card.released_at ?? null,
-        set_type: setInfo.set_type ?? null,
-        icon_svg_path: `/set-icons/${setCode}.svg`,
-        is_digital: setInfo.digital ? 1 : 0,
+      const setCode = setInfo.code;
+      if (!seenSets.has(setCode)) {
+        seenSets.add(setCode);
+        insSet.run({
+          code: setCode,
+          name: setInfo.name,
+          release_date: setInfo.released_at ?? card.released_at ?? null,
+          set_type: setInfo.set_type ?? null,
+          icon_svg_path: `/set-icons/${setCode}.svg`,
+          is_digital: setInfo.digital ? 1 : 0,
+        });
+      }
+
+      const rel = releaseCutoff(card) ?? setInfo.released_at ?? null;
+      const finishes = JSON.stringify(card.finishes ?? []);
+      const frameFx = JSON.stringify(card.frame_effects ?? []);
+      const foilOnly = card.finishes?.length === 1 && card.finishes[0] === "foil" ? 1 : 0;
+      const nonfoilOnly = card.finishes?.length === 1 && card.finishes[0] === "nonfoil" ? 1 : 0;
+
+      insCard.run({
+        oracle_id: card.oracle_id,
+        name: card.name,
+        mana_cost: card.mana_cost ?? null,
+        cmc: card.cmc ?? null,
+        type_line: card.type_line ?? null,
+        oracle_text: card.oracle_text ?? null,
+        colors: JSON.stringify(card.colors ?? []),
+        color_identity: JSON.stringify(card.color_identity ?? card.colors ?? []),
+        is_reserved: card.reserved ? 1 : 0,
+        legalities: JSON.stringify(card.legalities ?? {}),
       });
-    }
 
-    const rel = releaseCutoff(card) ?? setInfo.released_at ?? null;
-    const finishes = JSON.stringify(card.finishes ?? []);
-    const frameFx = JSON.stringify(card.frame_effects ?? []);
-    const foilOnly = card.finishes?.length === 1 && card.finishes[0] === "foil" ? 1 : 0;
-    const nonfoilOnly = card.finishes?.length === 1 && card.finishes[0] === "nonfoil" ? 1 : 0;
+      insP.run({
+        scryfall_id: card.id,
+        oracle_id: card.oracle_id,
+        set_code: setCode,
+        collector_number: card.collector_number ?? "",
+        rarity: card.rarity ?? "",
+        released_at: rel,
+        image_uri_large: card.image_uris?.large ?? null,
+        image_uri_normal: card.image_uris?.normal ?? null,
+        image_uri_small: card.image_uris?.small ?? null,
+        scryfall_uri: card.scryfall_uri ?? null,
+        tcgplayer_url: card.purchase_uris?.tcgplayer ?? null,
+        cardmarket_url: card.purchase_uris?.cardmarket ?? null,
+        is_foil_only: foilOnly,
+        is_nonfoil_only: nonfoilOnly,
+        is_promo: card.promo ? 1 : 0,
+        frame_effects: frameFx,
+        finishes,
+      });
 
-    insCard.run({
-      oracle_id: card.oracle_id,
-      name: card.name,
-      mana_cost: card.mana_cost ?? null,
-      cmc: card.cmc ?? null,
-      type_line: card.type_line ?? null,
-      oracle_text: card.oracle_text ?? null,
-      colors: JSON.stringify(card.colors ?? []),
-      color_identity: JSON.stringify(card.color_identity ?? card.colors ?? []),
-      is_reserved: card.reserved ? 1 : 0,
-      legalities: JSON.stringify(card.legalities ?? {}),
-    });
+      const pr = card.prices ?? {};
+      insPrice.run({
+        scryfall_id: card.id,
+        usd: priceMaybe(pr.usd),
+        usd_foil: priceMaybe(pr.usd_foil),
+        eur: priceMaybe(pr.eur),
+        tix: priceMaybe(pr.tix),
+      });
 
-    insP.run({
-      scryfall_id: card.id,
-      oracle_id: card.oracle_id,
-      set_code: setCode,
-      collector_number: card.collector_number ?? "",
-      rarity: card.rarity ?? "",
-      released_at: rel,
-      image_uri_large: card.image_uris?.large ?? null,
-      image_uri_normal: card.image_uris?.normal ?? null,
-      image_uri_small: card.image_uris?.small ?? null,
-      scryfall_uri: card.scryfall_uri ?? null,
-      tcgplayer_url: card.purchase_uris?.tcgplayer ?? null,
-      cardmarket_url: card.purchase_uris?.cardmarket ?? null,
-      is_foil_only: foilOnly,
-      is_nonfoil_only: nonfoilOnly,
-      is_promo: card.promo ? 1 : 0,
-      frame_effects: frameFx,
-      finishes,
-    });
-
-    const pr = card.prices ?? {};
-    insPrice.run({
-      scryfall_id: card.id,
-      usd: priceMaybe(pr.usd),
-      usd_foil: priceMaybe(pr.usd_foil),
-      eur: priceMaybe(pr.eur),
-      tix: priceMaybe(pr.tix),
-    });
-
-    n++;
+      n++;
       if (n % 50_000 === 0) console.log("…", n, "printings");
     }
 

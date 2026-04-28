@@ -94,23 +94,24 @@ function computeFloatingPreviewPosition(
   const pad = 10;
   const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+  const width = Math.max(260, Math.min(PREVIEW_PANEL_W, vw - pad * 2));
   const overlap = 4;
   const gap = 6 - overlap;
   let left: number;
   let top: number;
   if (anchor && anchor.width > 0) {
     const rightSide = anchor.left + anchor.width + gap;
-    const leftSide = anchor.left - PREVIEW_PANEL_W - gap;
-    if (rightSide + PREVIEW_PANEL_W <= vw - pad) left = rightSide;
+    const leftSide = anchor.left - width - gap;
+    if (rightSide + width <= vw - pad) left = rightSide;
     else if (leftSide >= pad) left = leftSide;
-    else left = Math.max(pad, Math.min(rightSide, vw - PREVIEW_PANEL_W - pad));
+    else left = Math.max(pad, Math.min(rightSide, vw - width - pad));
     top = anchor.top + (anchor.height - PREVIEW_APPROX_H) / 2;
     top = Math.max(pad, Math.min(top, vh - PREVIEW_APPROX_H - pad));
   } else {
-    left = Math.max(pad, Math.min(fallbackX + 12, vw - PREVIEW_PANEL_W - pad));
+    left = Math.max(pad, Math.min(fallbackX + 12, vw - width - pad));
     top = Math.max(pad, Math.min(fallbackY + 12, vh - PREVIEW_APPROX_H - pad));
   }
-  return { left, top, width: PREVIEW_PANEL_W };
+  return { left, top, width };
 }
 
 function HeatmapPriceRangeCallout({
@@ -218,6 +219,16 @@ export function HeatmapView() {
   const qc = useQueryClient();
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme !== "light";
+  const [isMobile, setIsMobile] = useState(false);
+  const [density, setDensity] = useState<"comfy" | "compact">("comfy");
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const onChange = () => setIsMobile(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   const queryString = useMemo(() => sp.toString(), [sp]);
   const colSortSelectValue = useMemo(() => normalizedColSort(sp), [sp]);
@@ -728,7 +739,12 @@ export function HeatmapView() {
   }, [statusData]);
 
   return (
-    <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden p-4">
+    <div
+      className={cn(
+        "flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden p-2 sm:p-4",
+        density === "compact" ? "gap-2" : "gap-3",
+      )}
+    >
       <HeatmapCommandPalette
         open={cmdOpen}
         onOpenChange={setCmdOpen}
@@ -739,8 +755,8 @@ export function HeatmapView() {
 
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">MTG Heatmap</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-lg font-semibold tracking-tight sm:text-xl">MTG Heatmap</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">
             Rows = cards · Columns = all sets matching filters · POC ≤ 2005 · header row / name column
             stay fixed while scrolling
           </p>
@@ -830,6 +846,17 @@ export function HeatmapView() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+          </FilterFieldTip>
+          <FilterFieldTip tip="Compact reduces padding and chrome for small screens." side="bottom">
+            <Select value={density} onValueChange={(v) => setDensity(v === "compact" ? "compact" : "comfy")}>
+              <SelectTrigger className="h-9 w-[min(100vw-8rem,9rem)] text-xs">
+                <SelectValue placeholder="Density" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="comfy">Density: comfy</SelectItem>
+                <SelectItem value="compact">Density: compact</SelectItem>
+              </SelectContent>
+            </Select>
           </FilterFieldTip>
           <Sheet
             open={filterSheet.open}
@@ -1136,10 +1163,10 @@ export function HeatmapView() {
         )}
       </div>
 
-      {floatingPreview?.cell && compactPreviewStyle ? (
+      {floatingPreview?.cell && compactPreviewStyle && !isMobile ? (
         <div
           ref={cardPreviewRef}
-          className="pointer-events-auto fixed z-50 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg"
+          className="pointer-events-auto fixed z-50 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl"
           style={{
             left: compactPreviewStyle.left,
             top: compactPreviewStyle.top,
@@ -1259,6 +1286,142 @@ export function HeatmapView() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {floatingPreview?.cell ? (
+        <Sheet
+          open={isMobile && previewPinned}
+          onOpenChange={(open) => {
+            if (!open) setPreviewPinned(false);
+          }}
+        >
+          <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto p-0">
+            <SheetHeader className="border-b border-border">
+              <SheetTitle className="pr-8">{rows[floatingPreview.row]?.name}</SheetTitle>
+              <p className="text-xs text-muted-foreground">
+                Tap a cell to open preview · Esc / close to dismiss
+              </p>
+            </SheetHeader>
+            <div className={cn("space-y-4 text-sm", density === "compact" ? "p-3" : "p-4")}>
+              {cardImageUrlForPreview(floatingPreview.cell) ? (
+                <div className="flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={cardImageUrlForPreview(floatingPreview.cell)!}
+                    alt=""
+                    width={488}
+                    height={680}
+                    className="w-full max-w-[min(420px,92vw)] rounded-lg border border-border object-contain"
+                    sizes="92vw"
+                    decoding="async"
+                  />
+                </div>
+              ) : null}
+              <div className="space-y-1.5">
+                <div className="text-muted-foreground">
+                  {columns[floatingPreview.col]?.set_type === "aggregate"
+                    ? `${columns[floatingPreview.col]?.name} (row aggregate)`
+                    : `${columns[floatingPreview.col]?.name} (${columns[floatingPreview.col]?.release_date})`}
+                </div>
+                {floatingPreview.cell.source_set_name ? (
+                  <div className="text-xs text-muted-foreground">
+                    Printing: {floatingPreview.cell.source_set_name}{" "}
+                    <span className="font-mono">
+                      ({(floatingPreview.cell.source_set_code ?? "").toUpperCase()})
+                    </span>
+                  </div>
+                ) : null}
+                {floatingPreview.cell.aggregate_note ? (
+                  <div className="text-[11px] leading-snug text-muted-foreground">
+                    {floatingPreview.cell.aggregate_note}
+                  </div>
+                ) : null}
+                <div className="font-mono text-xs">
+                  USD {floatingPreview.cell.usd ?? "—"} · Foil {floatingPreview.cell.usd_foil ?? "—"}
+                </div>
+                <HeatmapPriceRangeCallout
+                  row={rows[floatingPreview.row]}
+                  activeCol={floatingPreview.col}
+                  columns={columns}
+                  variant="compact"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={floatingPreview.cell.owned_qty > 0 ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => void toggleOwned()}
+                >
+                  {floatingPreview.cell.owned_qty > 0
+                    ? `Owned (${floatingPreview.cell.owned_qty})`
+                    : "Add owned"}
+                </Button>
+                <Button
+                  type="button"
+                  variant={floatingPreview.cell.watchlisted ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => void toggleWatch()}
+                >
+                  {floatingPreview.cell.watchlisted ? "Watchlisted" : "Watchlist"}
+                </Button>
+                <Button
+                  type="button"
+                  variant={rows[floatingPreview.row]?.pinned ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => void togglePin()}
+                >
+                  {rows[floatingPreview.row]?.pinned ? "Pinned row" : "Pin row"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={floatingPreview.cell.owned_qty <= 0}
+                  onClick={() => void decOwned()}
+                >
+                  Remove one
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="secondary" size="sm" className="gap-1" onClick={openCardDetail}>
+                  <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                  Expand
+                </Button>
+                {floatingPreview.cell.scryfall_uri ? (
+                  <a
+                    href={floatingPreview.cell.scryfall_uri}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+                  >
+                    Scryfall
+                  </a>
+                ) : null}
+                {floatingPreview.cell.tcgplayer_url ? (
+                  <a
+                    href={floatingPreview.cell.tcgplayer_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+                  >
+                    TCGplayer
+                  </a>
+                ) : null}
+                {floatingPreview.cell.cardmarket_url ? (
+                  <a
+                    href={floatingPreview.cell.cardmarket_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+                  >
+                    Cardmarket
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
       ) : null}
 
       <Dialog
