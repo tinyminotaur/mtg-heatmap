@@ -43,6 +43,8 @@ export type HeatmapGridHandle = {
   scrollCellIntoView: (row: number, col: number) => void;
 };
 
+export type { HeatmapCellAnchorRect } from "@/lib/heatmap/grid-geometry";
+
 type Props = {
   columns: ColumnMeta[];
   rows: RowDTO[];
