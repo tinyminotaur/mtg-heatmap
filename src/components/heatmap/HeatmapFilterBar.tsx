@@ -48,11 +48,7 @@ function filtersFromQuery(qs: string): HeatmapFilters {
 }
 
 function applyFilters(onReplaceQuery: (p: URLSearchParams) => void, f: HeatmapFilters) {
-  const p = serializeHeatmapUrlParams({ ...defaultHeatmapFilters, ...f });
-  // Important: when URL uses `s=` blob, deleting `hlay` can fall back to blob defaults.
-  // Explicitly writing `hlay=sets` ensures toggling away from value layout always sticks.
-  if (f.heatmapColumnLayout !== "value") p.set("hlay", "sets");
-  onReplaceQuery(p);
+  onReplaceQuery(serializeHeatmapUrlParams({ ...defaultHeatmapFilters, ...f }));
 }
 
 const SORT_LABEL: Record<SortSlot["key"], string> = {

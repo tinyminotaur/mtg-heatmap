@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import { ManaFontPreload } from "@/components/mana-font-preload";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
@@ -54,6 +55,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${jetbrains.variable} min-h-screen bg-background font-sans text-foreground antialiased`}
       >
+        <ManaFontPreload />
         <Providers>{children}</Providers>
       </body>
     </html>

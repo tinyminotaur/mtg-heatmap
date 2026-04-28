@@ -224,7 +224,8 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.groupBy !== "none") out.set("grp", f.groupBy);
   if (f.groupCollapsedKeys.length) out.set("gc", JSON.stringify(f.groupCollapsedKeys));
   if (f.headerSortSetCode) out.set("hcol", f.headerSortSetCode);
-  if (f.heatmapColumnLayout === "value") out.set("hlay", "value");
+  // Always write `hlay` so it overrides any `s=` blob defaults.
+  out.set("hlay", f.heatmapColumnLayout === "value" ? "value" : "sets");
   if (f.cellPriceField !== "usd") out.set("pm", f.cellPriceField);
 
   const skStr = normalizedSortSlots(f)

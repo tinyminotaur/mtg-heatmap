@@ -48,6 +48,20 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     expect(f.rarity).toEqual(["mythic", "rare"]);
   });
 
+  it("allows overriding blob heatmap layout with explicit hlay=sets", () => {
+    if (typeof Buffer === "undefined") return;
+    const blob = Buffer.from(JSON.stringify({ hlay: "value" }), "utf8").toString("base64url");
+    const sp = new URLSearchParams({ s: blob, hlay: "sets" });
+    const f = parseHeatmapUrlSearchParams(sp);
+    expect(f.heatmapColumnLayout).toBe("sets");
+  });
+
+  it("always serializes hlay so blob defaults cannot hijack layout", () => {
+    const f = { ...defaultHeatmapFilters, heatmapColumnLayout: "sets" as const };
+    const sp = serializeHeatmapUrlParams(f);
+    expect(sp.get("hlay")).toBe("sets");
+  });
+
   it("maps legacy price_avg to median", () => {
     const a = new URLSearchParams();
     a.set("sort", "price_avg");
