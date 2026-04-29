@@ -38,7 +38,8 @@ export function readFrozenBodyRowAnchorRect(args: {
   const rollupW = args.rollupW ?? HEATMAP_FROZEN_ROLLUP_W;
   const w = frozenColW + rollupW;
   return {
-    left: canvasRect.left - sl,
+    /** Frozen strip is viewport-fixed at x=0..w (not shifted by horizontal scroll). */
+    left: canvasRect.left,
     top: canvasRect.top + HEATMAP_HEADER_H + row * HEATMAP_ROW_HEIGHT - st,
     width: w,
     height: HEATMAP_ROW_HEIGHT,
@@ -96,13 +97,14 @@ export function clientPointToCell(args: {
   frozenColW?: number;
   rollupW?: number;
 }): CellHit | null {
-  const { clientX, clientY, canvasRect, scrollLeft, scrollTop, columnsLength, rowsLength } = args;
+  const { clientX, clientY, canvasRect, scrollLeft: sl, scrollTop: st, columnsLength, rowsLength } = args;
   const frozenColW = args.frozenColW ?? HEATMAP_FROZEN_COL_W;
   const rollupW = args.rollupW ?? HEATMAP_FROZEN_ROLLUP_W;
-  const x = clientX - canvasRect.left + scrollLeft;
-  const y = clientY - canvasRect.top + scrollTop;
-  if (x < frozenColW + rollupW || y < HEATMAP_HEADER_H) return null;
-  const col = Math.floor((x - (frozenColW + rollupW)) / HEATMAP_COL_WIDTH);
+  const vx = clientX - canvasRect.left;
+  const y = clientY - canvasRect.top + st;
+  /** Cells live to the right of the viewport-fixed frozen strip; use vx + sl as document x only there. */
+  if (vx < frozenColW + rollupW || y < HEATMAP_HEADER_H) return null;
+  const col = Math.floor((vx + sl - (frozenColW + rollupW)) / HEATMAP_COL_WIDTH);
   const row = Math.floor((y - HEATMAP_HEADER_H) / HEATMAP_ROW_HEIGHT);
   if (col < 0 || col >= columnsLength || row < 0 || row >= rowsLength) return null;
   return { row, col };
@@ -123,31 +125,33 @@ export function clientPointToHeatmapHover(args: {
     clientX,
     clientY,
     canvasRect,
-    scrollLeft,
-    scrollTop,
+    scrollLeft: sl,
+    scrollTop: st,
     columnsLength,
     rowsLength,
   } = args;
   const frozenColW = args.frozenColW ?? HEATMAP_FROZEN_COL_W;
   const rollupW = args.rollupW ?? HEATMAP_FROZEN_ROLLUP_W;
-  const x = clientX - canvasRect.left + scrollLeft;
-  const y = clientY - canvasRect.top + scrollTop;
+  /** Viewport coords: frozen columns are drawn at a fixed screen strip, not shifted by horizontal scroll. */
+  const vx = clientX - canvasRect.left;
+  const vy = clientY - canvasRect.top;
+  const y = vy + st;
   if (y < 0) return null;
   if (y >= 0 && y < HEATMAP_HEADER_H) {
-    if (x < frozenColW + rollupW) {
-      if (x < frozenColW) return { kind: "cardNameHeader" };
+    if (vx < frozenColW + rollupW) {
+      if (vx < frozenColW) return { kind: "cardNameHeader" };
       return { kind: "rollupHeader" };
     }
-    const col = Math.floor((x - (frozenColW + rollupW)) / HEATMAP_COL_WIDTH);
+    const col = Math.floor((vx + sl - (frozenColW + rollupW)) / HEATMAP_COL_WIDTH);
     if (col < 0 || col >= columnsLength) return null;
     return { kind: "setHeader", col };
   }
   const row = Math.floor((y - HEATMAP_HEADER_H) / HEATMAP_ROW_HEIGHT);
   if (row < 0 || row >= rowsLength) return null;
-  if (x < frozenColW + rollupW) {
+  if (vx < frozenColW + rollupW) {
     return { kind: "nameColumn", row };
   }
-  const col = Math.floor((x - (frozenColW + rollupW)) / HEATMAP_COL_WIDTH);
+  const col = Math.floor((vx + sl - (frozenColW + rollupW)) / HEATMAP_COL_WIDTH);
   if (col < 0 || col >= columnsLength) return null;
   return { kind: "dataCell", row, col };
 }

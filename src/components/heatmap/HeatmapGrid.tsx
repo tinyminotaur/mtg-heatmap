@@ -629,15 +629,17 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       const vx =
         effFrozenColW + effRollupW + selectedCol * HEATMAP_COL_WIDTH - sl;
       const vy = HEATMAP_HEADER_H + selectedRow * HEATMAP_ROW_HEIGHT - st;
+      const dataX0 = effFrozenColW + effRollupW;
+      const clipL = Math.max(vx, dataX0);
+      const clipR = Math.min(vx + HEATMAP_COL_WIDTH, vw);
       if (
-        vx + HEATMAP_COL_WIDTH > effFrozenColW + effRollupW &&
-        vx < vw &&
+        clipR > clipL &&
         vy + HEATMAP_ROW_HEIGHT > HEATMAP_HEADER_H &&
         vy < vh
       ) {
         ctx.strokeStyle = "#38bdf8";
         ctx.lineWidth = 2;
-        ctx.strokeRect(vx + 1, vy + 1, HEATMAP_COL_WIDTH - 2, HEATMAP_ROW_HEIGHT - 2);
+        ctx.strokeRect(clipL + 1, vy + 1, clipR - clipL - 2, HEATMAP_ROW_HEIGHT - 2);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- epochs bump draw when fonts/icons finish loading (not referenced inside draw)
