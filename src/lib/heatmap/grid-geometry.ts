@@ -19,7 +19,10 @@ export type HeatmapHoverHit =
   | { kind: "dataCell"; row: number; col: number }
   | { kind: "nameColumn"; row: number }
   | { kind: "setHeader"; col: number }
-  | { kind: "frozenCorner" };
+  /** Frozen “Card” column header (row sort menu). */
+  | { kind: "cardNameHeader" }
+  /** Frozen printings rollup header (narrow layout may hide). */
+  | { kind: "rollupHeader" };
 
 /** Frozen name / identity / rollup strip for one body row (including header offset). */
 export function readFrozenBodyRowAnchorRect(args: {
@@ -131,7 +134,10 @@ export function clientPointToHeatmapHover(args: {
   const y = clientY - canvasRect.top + scrollTop;
   if (y < 0) return null;
   if (y >= 0 && y < HEATMAP_HEADER_H) {
-    if (x < frozenColW + rollupW) return { kind: "frozenCorner" };
+    if (x < frozenColW + rollupW) {
+      if (x < frozenColW) return { kind: "cardNameHeader" };
+      return { kind: "rollupHeader" };
+    }
     const col = Math.floor((x - (frozenColW + rollupW)) / HEATMAP_COL_WIDTH);
     if (col < 0 || col >= columnsLength) return null;
     return { kind: "setHeader", col };

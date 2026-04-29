@@ -60,8 +60,7 @@ import { ViewsSelector } from "@/components/heatmap/filter-bar/ViewsSelector";
 
 export type ViewSessionMeta = { activeViewId: string | null; snapshotQuery: string | null };
 
-const RARITIES = ["common", "uncommon", "rare", "mythic", "special", "bonus"] as const;
-const COLOR_IDENTITY = ["W", "U", "B", "R", "G", "C"] as const;
+const EXTRA_RARITIES = ["special", "bonus"] as const;
 
 type Props = {
   queryString: string;
@@ -211,18 +210,9 @@ export function HeatmapFilterBar({
 
   const primarySort = f.sortSlots[0] ?? { key: "name" as const, dir: null };
 
-  const raritySummary =
-    f.rarity.length === 0 ? "Any rarity" : `${f.rarity.length} rarity type${f.rarity.length === 1 ? "" : "s"}`;
-
   const rarityCounts = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of facets?.rarity ?? []) m.set(r.key, r.n);
-    return m;
-  }, [facets]);
-
-  const colorCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of facets?.colorIdentity ?? []) m.set(r.key, r.n);
     return m;
   }, [facets]);
 
@@ -241,15 +231,13 @@ export function HeatmapFilterBar({
     return { year, cmc, price };
   }, [facets]);
 
-  const rowOptionsCount = useMemo(() => {
+  const rowExtraOptionsCount = useMemo(() => {
     let n = 0;
     if (f.includeDigital) n++;
     if (f.reservedOnly) n++;
-    if (f.owned === true) n++;
-    if (f.watchlist === true) n++;
     if (f.pinned === true) n++;
     return n;
-  }, [f.includeDigital, f.reservedOnly, f.owned, f.watchlist, f.pinned]);
+  }, [f.includeDigital, f.reservedOnly, f.pinned]);
 
   const activeChips = useMemo(() => buildActiveFilterChips(f), [f]);
 
@@ -309,15 +297,6 @@ export function HeatmapFilterBar({
       if (s.has(r)) s.delete(r);
       else s.add(r);
       return { ...b, rarity: [...s].sort() };
-    });
-  };
-
-  const toggleColorIdentity = (c: string) => {
-    patch((b) => {
-      const s = new Set(b.colors);
-      if (s.has(c)) s.delete(c);
-      else s.add(c);
-      return { ...b, colors: [...s].sort() };
     });
   };
 
@@ -682,27 +661,14 @@ export function HeatmapFilterBar({
               </p>
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,200px)]">
                 <div className="space-y-3 rounded-md border border-border/70 bg-background/40 p-3">
-                  <p className="text-xs font-medium text-muted-foreground">Filter by</p>
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetSearch} side="right" className="block w-full">
-                    <span className="block text-xs leading-relaxed text-muted-foreground">
-                      Card name matching uses the{" "}
-                      <span className="font-medium text-foreground">Search cards…</span> field in the top bar — not
-                      duplicated here.
-                    </span>
-                  </FilterFieldTip>
-                  <FilterFieldTip tip={HEATMAP_FILTER_TIPS.facetsBadge} side="right">
-                    <Badge variant="secondary" className="font-normal">
-                      {f.rarity.length ||
-                      f.yearMin != null ||
-                      f.yearMax != null ||
-                      f.cmcMin != null ||
-                      f.cmcMax != null ||
-                      f.priceMin != null ||
-                      f.priceMax != null
-                        ? "Facets on"
-                        : "No numeric facets"}
-                    </Badge>
-                  </FilterFieldTip>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Beyond the bar</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      The sticky bar covers search, mana colors, common–mythic rarity, status, USD price, and edition
+                      scope. Here: release year, mana value, format legality, type line prefixes, colorless (C), bonus
+                      rarities, and row flags that are not status tabs.
+                    </p>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetYear} side="right">
                       <div className="space-y-1">
@@ -772,113 +738,8 @@ export function HeatmapFilterBar({
                         />
                       </div>
                     </FilterFieldTip>
-                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetPrice} side="right">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Price min $</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          className="h-8 text-xs"
-                          value={f.priceMin ?? ""}
-                          onChange={(e) =>
-                            patch((b) => ({
-                              ...b,
-                              priceMin: e.target.value === "" ? null : Number(e.target.value),
-                            }))
-                          }
-                        />
-                      </div>
-                    </FilterFieldTip>
-                    <FilterFieldTip tip={HEATMAP_FILTER_TIPS.sheetPrice} side="right">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Price max $</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          className="h-8 text-xs"
-                          value={f.priceMax ?? ""}
-                          onChange={(e) =>
-                            patch((b) => ({
-                              ...b,
-                              priceMax: e.target.value === "" ? null : Number(e.target.value),
-                            }))
-                          }
-                        />
-                      </div>
-                    </FilterFieldTip>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
-                      >
-                        Rarity: {raritySummary}
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-52" align="start">
-                        <DropdownMenuGroup>
-                          <DropdownMenuLabel className="text-xs">Rarities (multi)</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          {RARITIES.map((r) => (
-                            <DropdownMenuCheckboxItem
-                              key={r}
-                              checked={f.rarity.includes(r)}
-                              onCheckedChange={() => toggleRarity(r)}
-                              className="capitalize"
-                            >
-                              <span className="flex w-full items-center justify-between gap-2">
-                                <span>{r}</span>
-                                {rarityCounts.has(r) ? (
-                                  <span className="font-mono text-[10px] text-muted-foreground">
-                                    {rarityCounts.get(r)!.toLocaleString()}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </DropdownMenuCheckboxItem>
-                          ))}
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
-                      >
-                        Color ID:{" "}
-                        {f.colors.length
-                          ? f.colors.join("")
-                          : colorCounts.has("(none)")
-                            ? `Any (colorless ${colorCounts.get("(none)")!.toLocaleString()})`
-                            : "Any"}
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-56" align="start">
-                        <DropdownMenuGroup>
-                          <DropdownMenuLabel className="text-xs">Color identity (multi)</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          {COLOR_IDENTITY.map((c) => (
-                            <DropdownMenuCheckboxItem
-                              key={c}
-                              checked={f.colors.includes(c)}
-                              onCheckedChange={() => toggleColorIdentity(c)}
-                              className="font-mono"
-                            >
-                              <span className="flex w-full items-center justify-between gap-2">
-                                <span>{c === "C" ? "Colorless" : c}</span>
-                                {c === "C" ? (
-                                  colorCounts.has("(none)") ? (
-                                    <span className="font-mono text-[10px] text-muted-foreground">
-                                      {colorCounts.get("(none)")!.toLocaleString()}
-                                    </span>
-                                  ) : null
-                                ) : colorCounts.has(c) ? (
-                                  <span className="font-mono text-[10px] text-muted-foreground">
-                                    {colorCounts.get(c)!.toLocaleString()}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </DropdownMenuCheckboxItem>
-                          ))}
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
@@ -935,78 +796,85 @@ export function HeatmapFilterBar({
                         </DropdownMenuGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 gap-2 text-xs")}
-                      >
-                        Row scope{rowOptionsCount ? ` (${rowOptionsCount})` : ""}
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-60" align="start">
-                        <DropdownMenuGroup>
-                          <DropdownMenuLabel className="text-xs">Restrict rows</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuCheckboxItem
-                            checked={f.includeDigital}
-                            onCheckedChange={(v) => patch((b) => ({ ...b, includeDigital: Boolean(v) }))}
-                          >
-                            Include digital sets
-                          </DropdownMenuCheckboxItem>
-                          <DropdownMenuCheckboxItem
-                            checked={Boolean(f.reservedOnly)}
-                            onCheckedChange={(v) => patch((b) => ({ ...b, reservedOnly: v ? true : null }))}
-                          >
-                            <span className="flex w-full items-center justify-between gap-2">
-                              <span>Reserved List only</span>
-                              {facets?.rowScope ? (
-                                <span className="font-mono text-[10px] text-muted-foreground">
-                                  {facets.rowScope.reserved.toLocaleString()}
-                                </span>
-                              ) : null}
-                            </span>
-                          </DropdownMenuCheckboxItem>
-                          <DropdownMenuCheckboxItem
-                            checked={f.owned === true}
-                            onCheckedChange={(v) => patch((b) => ({ ...b, owned: v ? true : null }))}
-                          >
-                            <span className="flex w-full items-center justify-between gap-2">
-                              <span>Owned only</span>
-                              {facets?.rowScope ? (
-                                <span className="font-mono text-[10px] text-muted-foreground">
-                                  {facets.rowScope.owned.toLocaleString()}
-                                </span>
-                              ) : null}
-                            </span>
-                          </DropdownMenuCheckboxItem>
-                          <DropdownMenuCheckboxItem
-                            checked={f.watchlist === true}
-                            onCheckedChange={(v) => patch((b) => ({ ...b, watchlist: v ? true : null }))}
-                          >
-                            <span className="flex w-full items-center justify-between gap-2">
-                              <span>Watchlist only</span>
-                              {facets?.rowScope ? (
-                                <span className="font-mono text-[10px] text-muted-foreground">
-                                  {facets.rowScope.watchlist.toLocaleString()}
-                                </span>
-                              ) : null}
-                            </span>
-                          </DropdownMenuCheckboxItem>
-                          <DropdownMenuCheckboxItem
-                            checked={f.pinned === true}
-                            onCheckedChange={(v) => patch((b) => ({ ...b, pinned: v ? true : null }))}
-                          >
-                            <span className="flex w-full items-center justify-between gap-2">
-                              <span>Pinned only</span>
-                              {facets?.rowScope ? (
-                                <span className="font-mono text-[10px] text-muted-foreground">
-                                  {facets.rowScope.pinned.toLocaleString()}
-                                </span>
-                              ) : null}
-                            </span>
-                          </DropdownMenuCheckboxItem>
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </div>
+                  <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Row flags{rowExtraOptionsCount ? ` (${rowExtraOptionsCount})` : ""}
+                    </p>
+                    <label className="flex cursor-pointer items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={f.includeDigital}
+                        onCheckedChange={(v) => patch((b) => ({ ...b, includeDigital: Boolean(v) }))}
+                      />
+                      Include digital sets
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={Boolean(f.reservedOnly)}
+                        onCheckedChange={(v) => patch((b) => ({ ...b, reservedOnly: v ? true : null }))}
+                      />
+                      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                        <span>Reserved List only</span>
+                        {facets?.rowScope ? (
+                          <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                            {facets.rowScope.reserved.toLocaleString()}
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={f.pinned === true}
+                        onCheckedChange={(v) => patch((b) => ({ ...b, pinned: v ? true : null }))}
+                      />
+                      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                        <span>Pinned rows only</span>
+                        {facets?.rowScope ? (
+                          <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                            {facets.rowScope.pinned.toLocaleString()}
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
+                    <p className="text-[10px] leading-snug text-muted-foreground">
+                      Owned / wishlist / neither use the <span className="font-medium text-foreground">status tabs</span>{" "}
+                      in the bar (not duplicated here).
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Bonus rarities</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      The bar toggles common–mythic. Enable special or bonus when you need them.
+                    </p>
+                    <div className="flex flex-wrap gap-4">
+                      {EXTRA_RARITIES.map((r) => (
+                        <label key={r} className="flex cursor-pointer items-center gap-1.5 text-xs capitalize">
+                          <Checkbox checked={f.rarity.includes(r)} onCheckedChange={() => toggleRarity(r)} />
+                          {r}
+                          {rarityCounts.has(r) ? (
+                            <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                              {rarityCounts.get(r)!.toLocaleString()}
+                            </span>
+                          ) : null}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs">
+                    <Checkbox
+                      checked={f.colors.includes("C")}
+                      onCheckedChange={(v) => {
+                        const on = Boolean(v);
+                        patch((b) => {
+                          const s = new Set(b.colors);
+                          if (on) s.add("C");
+                          else s.delete("C");
+                          return { ...b, colors: [...s].sort() };
+                        });
+                      }}
+                    />
+                    Colorless color identity (C)
+                  </label>
                   <FilterFieldTip tip={HEATMAP_FILTER_TIPS.specialGroup} side="right">
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">Special group slug</Label>
@@ -1211,9 +1079,9 @@ export function HeatmapFilterBar({
               <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Columns
               </p>
-              <div className="flex flex-col gap-3">
-                <div className="rounded-md border border-border/70 bg-background/40 p-3">
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">Filter by</p>
+              <div className="space-y-4 rounded-md border border-border/70 bg-background/40 p-3">
+                <div>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">Edition scope & exclusions</p>
                   <HeatmapFilterColumns
                     variant="columnFilters"
                     queryString={queryString}
@@ -1225,8 +1093,8 @@ export function HeatmapFilterBar({
                     topSets={facets?.topSets ?? []}
                   />
                 </div>
-                <div className="rounded-md border border-border/70 bg-background/40 p-3">
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">Sort by</p>
+                <div className="border-t border-border/70 pt-4">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">Column order & layout</p>
                   <HeatmapFilterColumns
                     variant="columnSort"
                     queryString={queryString}

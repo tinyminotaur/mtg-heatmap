@@ -88,6 +88,8 @@ type Props = {
     clientY: number,
     anchor: HeatmapCellAnchorRect,
   ) => void;
+  /** Click frozen “Card” header — opens row sort menu (viewport anchor rect). */
+  onCardNameHeaderClick?: (anchor: { left: number; top: number; width: number; height: number }) => void;
 };
 
 function drawPriceRangeBadge(
@@ -186,6 +188,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     onHeaderSetClick,
     onHoverFrozenRowBody,
     onHoverEditionHeader,
+    onCardNameHeaderClick,
   },
   ref,
 ) {
@@ -579,6 +582,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ctx.fillStyle = muted;
     ctx.font = "11px system-ui";
     ctx.fillText("Card", 8, HEATMAP_HEADER_H / 2 + 4);
+    ctx.fillText("▾", effFrozenColW - 12, HEATMAP_HEADER_H / 2 + 4);
     // Printings header.
     if (effRollupW > 0) {
       ctx.save();
@@ -801,6 +805,22 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     const x = e.clientX - rect.left + scrollEl.scrollLeft;
     const y = e.clientY - rect.top + scrollEl.scrollTop;
     if (
+      onCardNameHeaderClick &&
+      y >= 0 &&
+      y < HEATMAP_HEADER_H &&
+      x >= 0 &&
+      x < effFrozenColW
+    ) {
+      const br = canvas.getBoundingClientRect();
+      onCardNameHeaderClick({
+        left: br.left,
+        top: br.top,
+        width: effFrozenColW,
+        height: HEATMAP_HEADER_H,
+      });
+      return;
+    }
+    if (
       onHeaderSetClick &&
       y >= 0 &&
       y < HEATMAP_HEADER_H &&
@@ -833,6 +853,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     const scrollEl = scrollRef.current;
     const canvas = canvasRef.current;
     if (!scrollEl || !canvas) return;
+    canvas.style.cursor = "crosshair";
     const rect = canvas.getBoundingClientRect();
     const hoverHit = clientPointToHeatmapHover({
       clientX: e.clientX,
@@ -851,10 +872,11 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       onLeaveGrid();
       return;
     }
-    if (hoverHit.kind === "frozenCorner") {
+    if (hoverHit.kind === "cardNameHeader" || hoverHit.kind === "rollupHeader") {
       lastHoverWithCellRef.current = null;
       lastHoverAuxRef.current = null;
       onLeaveGrid();
+      canvas.style.cursor = hoverHit.kind === "cardNameHeader" ? "pointer" : "crosshair";
       return;
     }
     if (hoverHit.kind === "nameColumn") {
@@ -970,6 +992,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   };
 
   const onPortMouseLeave = () => {
+    const canvas = canvasRef.current;
+    if (canvas) canvas.style.cursor = "crosshair";
     onLeaveGrid();
   };
 

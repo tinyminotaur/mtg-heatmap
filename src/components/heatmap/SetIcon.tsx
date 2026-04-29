@@ -32,14 +32,22 @@ export function SetIcon({
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      width={size}
-      height={size}
-      className={cn("shrink-0 object-contain", className)}
-      onError={() => setFailed(true)}
-    />
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded border border-border bg-white shadow-sm ring-1 ring-black/5 dark:border-zinc-500/70 dark:bg-zinc-100 dark:ring-white/10",
+        className,
+      )}
+      style={{ width: size, height: size }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        width={size}
+        height={size}
+        className="max-h-[82%] max-w-[82%] object-contain"
+        onError={() => setFailed(true)}
+      />
+    </span>
   );
 }

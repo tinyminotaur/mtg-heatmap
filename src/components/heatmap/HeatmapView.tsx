@@ -27,7 +27,10 @@ import {
 } from "@/lib/heatmap/tanstack-adapter";
 import { HeatmapCommandPalette } from "./HeatmapCommandPalette";
 import { HeatmapFilterBar, type ViewSessionMeta } from "./HeatmapFilterBar";
+import type { SortSlot } from "@/lib/filter-state";
+import { applyPrimaryRowSort } from "@/lib/heatmap/row-sort-menu";
 import { HeatmapGrid, type HeatmapCellAnchorRect, type HeatmapGridHandle } from "./HeatmapGrid";
+import { HeatmapRowSortMenu, type RowSortAnchorRect } from "./HeatmapRowSortMenu";
 import { HeatmapGuideDialog } from "./HeatmapGuideDialog";
 import { OwnedListPanel } from "@/components/owned/OwnedListPanel";
 import { WatchlistListPanel } from "@/components/watchlist/WatchlistListPanel";
@@ -300,6 +303,8 @@ export function HeatmapView() {
     y: number;
     anchor: HeatmapCellAnchorRect;
   } | null>(null);
+  const [rowSortMenuOpen, setRowSortMenuOpen] = useState(false);
+  const [rowSortAnchor, setRowSortAnchor] = useState<RowSortAnchorRect | null>(null);
   const [previewPinned, setPreviewPinned] = useState(false);
   const [anchorEpoch, setAnchorEpoch] = useState(0);
   const [pinnedAnchor, setPinnedAnchor] = useState<HeatmapCellAnchorRect | null>(null);
@@ -421,6 +426,20 @@ export function HeatmapView() {
     (nextSorting: SortingState) => {
       const nextFilters = tanStackStateToHeatmapFilters({ sorting: nextSorting }, urlFilters);
       replaceQuery(serializeHeatmapUrlParams(nextFilters));
+    },
+    [replaceQuery, urlFilters],
+  );
+
+  const onCardNameHeaderClick = useCallback((anchor: RowSortAnchorRect) => {
+    setRowSortAnchor(anchor);
+    setRowSortMenuOpen(true);
+  }, []);
+
+  const onPickRowSort = useCallback(
+    (key: SortSlot["key"]) => {
+      const next = applyPrimaryRowSort(urlFilters, key);
+      replaceQuery(serializeHeatmapUrlParams(next));
+      setRowSortMenuOpen(false);
     },
     [replaceQuery, urlFilters],
   );
@@ -1061,6 +1080,17 @@ export function HeatmapView() {
                       setEditionHeaderHover({ col, x, y, anchor });
                     }
               }
+              onCardNameHeaderClick={onCardNameHeaderClick}
+            />
+            <HeatmapRowSortMenu
+              open={rowSortMenuOpen}
+              onOpenChange={(open) => {
+                setRowSortMenuOpen(open);
+                if (!open) setRowSortAnchor(null);
+              }}
+              anchorRect={rowSortAnchor}
+              activeKey={urlFilters.sortSlots[0]?.key ?? "name"}
+              onPick={onPickRowSort}
             />
             {isFetching ? (
               <div className="pointer-events-none absolute inset-0 flex items-start justify-end p-2">
@@ -1311,7 +1341,7 @@ export function HeatmapView() {
           <div className="mb-2 border-b border-border pb-2 text-xs font-medium text-muted-foreground">Edition</div>
           <div className="flex gap-3">
             {columns[editionHeaderHover.col]!.set_type !== "aggregate" ? (
-              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/40">
+              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-white shadow-sm ring-1 ring-black/5 dark:border-zinc-500/70 dark:bg-zinc-100 dark:ring-white/10">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={resolveSetIconSvgUrl(
@@ -1321,7 +1351,7 @@ export function HeatmapView() {
                   alt=""
                   width={56}
                   height={56}
-                  className="h-full w-full object-contain p-1"
+                  className="h-full w-full object-contain p-1.5"
                   decoding="async"
                 />
               </div>
