@@ -465,26 +465,32 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       }
       ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
       ctx.strokeRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
-      const isz = 30;
-      const iy = 4;
-      /** Year sits just under the set tile to avoid a large empty band (non-aggregate columns). */
-      const yearYNonAgg = iy + isz + 3;
+      const isz = 28;
+      const gapIconYear = 5;
+      const yearFontPx = 10;
+      /** Stack height: icon + gap + year line (top baseline). */
+      const stackH = isz + gapIconYear + yearFontPx * 1.15;
+      const blockTop = Math.max(3, Math.floor((HEATMAP_HEADER_H - stackH) / 2));
+      const iy = blockTop;
       if (c.set_type === "aggregate") {
+        const aggH = isz + 10;
+        const aggTop = Math.max(2, Math.floor((HEATMAP_HEADER_H - aggH - 14) / 2));
         ctx.fillStyle = dark ? "#1e293b" : "#e2e8f0";
         ctx.beginPath();
-        ctx.roundRect(vx + 3, iy, HEATMAP_COL_WIDTH - 6, isz + 10, 6);
+        ctx.roundRect(vx + 3, aggTop, HEATMAP_COL_WIDTH - 6, aggH, 6);
         ctx.fill();
         ctx.fillStyle = fg;
         ctx.font = "bold 12px system-ui";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(c.name, vx + HEATMAP_COL_WIDTH / 2, iy + (isz + 10) / 2 + 2);
+        ctx.fillText(c.name, vx + HEATMAP_COL_WIDTH / 2, aggTop + aggH / 2 + 1);
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
         ctx.fillStyle = muted;
         ctx.font = "9px ui-monospace, system-ui, sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("Σ row", vx + HEATMAP_COL_WIDTH / 2, HEATMAP_HEADER_H - 4);
+        ctx.textBaseline = "top";
+        ctx.fillText("Σ row", vx + HEATMAP_COL_WIDTH / 2, aggTop + aggH + 4);
         ctx.textAlign = "left";
         continue;
       }
@@ -520,11 +526,16 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.textBaseline = "alphabetic";
       }
       ctx.fillStyle = muted;
-      ctx.font = "10px ui-monospace, system-ui, sans-serif";
+      ctx.font = `${yearFontPx}px ui-monospace, system-ui, sans-serif`;
       ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
-      ctx.fillText(c.year != null ? String(c.year) : "—", vx + HEATMAP_COL_WIDTH / 2, yearYNonAgg);
+      ctx.textBaseline = "top";
+      ctx.fillText(
+        c.year != null ? String(c.year) : "—",
+        vx + HEATMAP_COL_WIDTH / 2,
+        iy + isz + gapIconYear,
+      );
       ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
     }
     ctx.restore();
 
