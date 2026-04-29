@@ -388,6 +388,16 @@ export function HeatmapFilterBar(props: Props) {
             priceMin={f.priceMin}
             priceMax={f.priceMax}
             onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
+            cellPriceField={f.cellPriceField}
+            onPriceFieldChange={(cellPriceField) =>
+              patch((b) => ({
+                ...b,
+                cellPriceField:
+                  cellPriceField === "usd_foil" || cellPriceField === "eur" || cellPriceField === "tix"
+                    ? cellPriceField
+                    : "usd",
+              }))
+            }
           />
           <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/25 px-2 py-1">
             <span className="text-xs font-medium text-muted-foreground">Edition</span>
@@ -511,6 +521,16 @@ export function HeatmapFilterBar(props: Props) {
                 priceMin={f.priceMin}
                 priceMax={f.priceMax}
                 onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
+                cellPriceField={f.cellPriceField}
+                onPriceFieldChange={(cellPriceField) =>
+                  patch((b) => ({
+                    ...b,
+                    cellPriceField:
+                      cellPriceField === "usd_foil" || cellPriceField === "eur" || cellPriceField === "tix"
+                        ? cellPriceField
+                        : "usd",
+                  }))
+                }
               />
             </section>
             <section className="space-y-2">
@@ -590,29 +610,7 @@ export function HeatmapFilterBar(props: Props) {
               <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Display
               </p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Price field</span>
-                  <Select
-                    value={f.cellPriceField}
-                    onValueChange={(v) =>
-                      patch((b) => ({
-                        ...b,
-                        cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="usd">USD</SelectItem>
-                      <SelectItem value="usd_foil">USD foil</SelectItem>
-                      <SelectItem value="eur">EUR</SelectItem>
-                      <SelectItem value="tix">TIX</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">Density</span>
                   <Select

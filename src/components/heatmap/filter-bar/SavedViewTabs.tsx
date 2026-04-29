@@ -1,7 +1,7 @@
 "use client";
 
-import { ChevronDown, GripVertical, Plus } from "lucide-react";
-import { startTransition, useCallback, useMemo, useState } from "react";
+import { ChevronDown, Plus } from "lucide-react";
+import { useMemo } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,12 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  loadSavedViewOrder,
-  orderSavedViews,
-  persistSavedViewOrder,
-  type SavedView,
-} from "@/lib/saved-views";
+import { loadSavedViewOrder, orderSavedViews, type SavedView } from "@/lib/saved-views";
 import type { RowStatusTab } from "@/lib/heatmap/row-status";
 import { cn } from "@/lib/utils";
 
@@ -66,9 +61,6 @@ export function SavedViewTabs({
   onDuplicateActiveView,
   onNewView,
 }: Props) {
-  const [orderNonce, setOrderNonce] = useState(0);
-  const [dragId, setDragId] = useState<string | null>(null);
-
   const mergedOrder = useMemo(() => {
     const loaded = typeof window !== "undefined" ? loadSavedViewOrder() : [];
     const ids = new Set(savedViews.map((v) => v.id));
@@ -76,9 +68,8 @@ export function SavedViewTabs({
     for (const v of savedViews) {
       if (!base.includes(v.id)) base.push(v.id);
     }
-    void orderNonce;
     return base;
-  }, [savedViews, orderNonce]);
+  }, [savedViews]);
 
   const orderedViews = useMemo(() => orderSavedViews(savedViews, mergedOrder), [savedViews, mergedOrder]);
 
@@ -93,18 +84,6 @@ export function SavedViewTabs({
     if (!activeViewId || snapshotQuery == null) return false;
     return queryString !== snapshotQuery;
   }, [showingStatusTab, activeViewId, queryString, snapshotQuery]);
-
-  const reorder = useCallback((fromId: string, toId: string) => {
-    if (fromId === toId) return;
-    const ix = [...mergedOrder];
-    const ai = ix.indexOf(fromId);
-    const bi = ix.indexOf(toId);
-    if (ai < 0 || bi < 0) return;
-    ix.splice(ai, 1);
-    ix.splice(bi, 0, fromId);
-    persistSavedViewOrder(ix);
-    startTransition(() => setOrderNonce((n) => n + 1));
-  }, [mergedOrder]);
 
   return (
     <div className="flex min-h-9 w-full min-w-0 items-center gap-1">
@@ -145,40 +124,17 @@ export function SavedViewTabs({
           return (
             <div
               key={v.id}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (dragId && dragId !== v.id) e.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragId) reorder(dragId, v.id);
-                setDragId(null);
-              }}
               className={cn(
                 "flex shrink-0 items-stretch rounded-md",
-                dragId === v.id && "opacity-60",
                 selected && "bg-background shadow-sm",
               )}
             >
-              <span
-                draggable
-                onDragStart={(e) => {
-                  setDragId(v.id);
-                  e.dataTransfer.setData("text/plain", v.id);
-                  e.dataTransfer.effectAllowed = "move";
-                }}
-                onDragEnd={() => setDragId(null)}
-                className="flex cursor-grab items-center px-0.5 text-muted-foreground hover:text-foreground active:cursor-grabbing"
-                title="Drag to reorder"
-              >
-                <GripVertical className="size-3.5" aria-hidden />
-              </span>
               <button
                 type="button"
                 role="tab"
                 aria-selected={selected}
                 className={cn(
-                  "max-w-[10rem] truncate rounded-md px-2 py-1.5 text-left text-xs font-medium transition-colors",
+                  "max-w-[10rem] truncate rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
                   selected ? "text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                 )}
                 onClick={() => onSelectView(v)}

@@ -704,6 +704,23 @@ export function HeatmapView() {
 
       if (inField) return;
 
+      if (cmdOpen || helpOpen || cardDetailOpen) return;
+
+      if (e.key === " " && !e.repeat) {
+        e.preventDefault();
+        const cell = rows[rowIndex]?.cells[colIndex] ?? null;
+        if (!cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode)) return;
+        cancelHoverDismiss();
+        setNameRowHover(null);
+        setEditionHeaderHover(null);
+        const a = heatmapGridRef.current?.getDataCellClientRect(rowIndex, colIndex);
+        if (!a) return;
+        const x = a.left + a.width / 2;
+        const y = a.top + a.height / 2;
+        setHover({ row: rowIndex, col: colIndex, cell, x, y, anchor: a });
+        return;
+      }
+
       if (e.key === "Enter") {
         e.preventDefault();
         openScryfallSelection();
@@ -796,11 +813,18 @@ export function HeatmapView() {
       if (goTimer.current) clearTimeout(goTimer.current);
     };
   }, [
+    cmdOpen,
+    helpOpen,
     columns.length,
+    colIndex,
     decOwned,
+    heatmapMatchMode,
     openScryfallSelection,
+    priceMode,
     persistSessionNav,
     router,
+    rowIndex,
+    rows,
     rows.length,
     toggleFiltersPanel,
     toggleOwned,
@@ -810,6 +834,7 @@ export function HeatmapView() {
     cancelHoverDismiss,
     previewPinned,
     setParam,
+    invalidateAfterCollectionChange,
   ]);
 
   const floatingPreview = useMemo(() => {
@@ -1022,6 +1047,7 @@ export function HeatmapView() {
         onApplySearch={(q) => setParam("q", q)}
         onNavigateOwned={() => setOwnedOverlayOpen(true)}
         onNavigateWatchlist={() => setWatchlistOverlayOpen(true)}
+        onCollectionChanged={invalidateAfterCollectionChange}
       />
 
       <HeatmapGuideDialog
@@ -1862,6 +1888,7 @@ export function HeatmapView() {
           </SheetHeader>
           <ul className="mt-4 list-inside list-disc space-y-1 text-sm text-muted-foreground">
             <li>Arrows: move selection</li>
+            <li>Space: preview selected cell (same as hovering it)</li>
             <li>Enter: open Scryfall for selected printing</li>
             <li>O: add owned · Shift+O: remove one copy</li>
             <li>W: watchlist · P: pin to favorites strip (API)</li>
