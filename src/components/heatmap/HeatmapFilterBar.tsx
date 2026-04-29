@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { Filter, MoreHorizontal, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +19,6 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -96,27 +94,22 @@ const SORT_LABEL: Record<SortSlot["key"], string> = {
   cmc: "CMC",
 };
 
-export function HeatmapFilterBar({
-  queryString,
-  columns,
-  onReplaceQuery,
-  onSortingChange,
-  columnVisibility,
-  onColumnVisibilityChange,
-  activeViewId,
-  snapshotQuery,
-  onViewSessionChange,
-  filtersRootOpen,
-  onFiltersRootOpenChange,
-  density,
-  onDensityChange,
-  onOpenCommandPalette,
-  onOpenKeyboardHelp,
-  onPersistNav,
-  onOpenOwnedPanel,
-  onOpenWishlistPanel,
-}: Props) {
-  const router = useRouter();
+export function HeatmapFilterBar(props: Props) {
+  const {
+    queryString,
+    columns,
+    onReplaceQuery,
+    onSortingChange,
+    columnVisibility,
+    onColumnVisibilityChange,
+    activeViewId,
+    snapshotQuery,
+    onViewSessionChange,
+    filtersRootOpen,
+    onFiltersRootOpenChange,
+    density,
+    onDensityChange,
+  } = props;
   const { filters: f, patch } = useHeatmapUrlFilters(queryString, onReplaceQuery);
 
   const facetsUrl = useMemo(() => `/api/heatmap/facets?${queryString}`, [queryString]);
@@ -438,96 +431,6 @@ export function HeatmapFilterBar({
             <SlidersHorizontal className="size-3.5" />
             Advanced
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "icon" }),
-                "size-9 shrink-0",
-              )}
-              aria-label="More view and display options"
-            >
-              <MoreHorizontal className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem
-                onClick={() => {
-                  onPersistNav?.();
-                  if (onOpenOwnedPanel) onOpenOwnedPanel();
-                  else router.push("/owned");
-                }}
-              >
-                Owned
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  onPersistNav?.();
-                  if (onOpenWishlistPanel) onOpenWishlistPanel();
-                  else router.push("/watchlist");
-                }}
-              >
-                Wishlist
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onOpenCommandPalette}>Command palette (⌘K)</DropdownMenuItem>
-              <DropdownMenuItem onClick={onOpenKeyboardHelp}>Keyboard shortcuts (?)</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs">Display</DropdownMenuLabel>
-                <div className="space-y-2 px-2 pb-2">
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-muted-foreground">Price field</span>
-                    <Select
-                      value={f.cellPriceField}
-                      onValueChange={(v) =>
-                        patch((b) => ({
-                          ...b,
-                          cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
-                        }))
-                      }
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="usd">USD</SelectItem>
-                        <SelectItem value="usd_foil">USD foil</SelectItem>
-                        <SelectItem value="eur">EUR</SelectItem>
-                        <SelectItem value="tix">TIX</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-muted-foreground">Density</span>
-                    <Select
-                      value={density}
-                      onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="comfy">Comfy</SelectItem>
-                        <SelectItem value="compact">Compact</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <label className="flex items-center gap-2 text-xs">
-                    <Checkbox
-                      checked={f.matchMode === "strict"}
-                      onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
-                    />
-                    Strict cells
-                  </label>
-                  <label className="flex items-center gap-2 text-xs">
-                    <Checkbox
-                      checked={f.showPinned}
-                      onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))}
-                    />
-                    Pinned strip
-                  </label>
-                </div>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
 
         <div className="flex items-center gap-2 px-2 py-2 md:hidden">
@@ -683,6 +586,65 @@ export function HeatmapFilterBar({
             </div>
           ) : null}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <section className="rounded-lg border border-border bg-muted/10 p-3 lg:col-span-2">
+              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Display
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1">
+                  <span className="text-[10px] text-muted-foreground">Price field</span>
+                  <Select
+                    value={f.cellPriceField}
+                    onValueChange={(v) =>
+                      patch((b) => ({
+                        ...b,
+                        cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="usd">USD</SelectItem>
+                      <SelectItem value="usd_foil">USD foil</SelectItem>
+                      <SelectItem value="eur">EUR</SelectItem>
+                      <SelectItem value="tix">TIX</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] text-muted-foreground">Density</span>
+                  <Select
+                    value={density}
+                    onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="comfy">Comfy</SelectItem>
+                      <SelectItem value="compact">Compact</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2 py-2 text-xs">
+                  <Checkbox
+                    checked={f.matchMode === "strict"}
+                    onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
+                  />
+                  Strict cells
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2 py-2 text-xs">
+                  <Checkbox
+                    checked={f.showPinned}
+                    onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))}
+                  />
+                  Pinned strip
+                </label>
+              </div>
+            </section>
+
             {/* Rows */}
             <section className="rounded-lg border border-border bg-muted/10 p-3">
               <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

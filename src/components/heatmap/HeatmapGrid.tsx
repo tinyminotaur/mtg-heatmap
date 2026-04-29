@@ -442,7 +442,9 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
       ctx.strokeRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
       const isz = 30;
-      const iy = 5;
+      const iy = 4;
+      /** Year sits just under the set tile to avoid a large empty band (non-aggregate columns). */
+      const yearYNonAgg = iy + isz + 3;
       if (c.set_type === "aggregate") {
         ctx.fillStyle = dark ? "#1e293b" : "#e2e8f0";
         ctx.beginPath();
@@ -458,7 +460,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillStyle = muted;
         ctx.font = "9px ui-monospace, system-ui, sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("Σ row", vx + HEATMAP_COL_WIDTH / 2, HEATMAP_HEADER_H - 6);
+        ctx.fillText("Σ row", vx + HEATMAP_COL_WIDTH / 2, HEATMAP_HEADER_H - 4);
         ctx.textAlign = "left";
         continue;
       }
@@ -496,7 +498,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       ctx.fillStyle = muted;
       ctx.font = "10px ui-monospace, system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(c.year != null ? String(c.year) : "—", vx + HEATMAP_COL_WIDTH / 2, HEATMAP_HEADER_H - 6);
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(c.year != null ? String(c.year) : "—", vx + HEATMAP_COL_WIDTH / 2, yearYNonAgg);
       ctx.textAlign = "left";
     }
     ctx.restore();
