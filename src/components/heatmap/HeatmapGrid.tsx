@@ -561,20 +561,30 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       if (row.pinned) {
-        ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.2)" : "rgba(147, 51, 234, 0.14)";
+        ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.3)" : "rgba(147, 51, 234, 0.22)";
         ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       if (row.watchlisted) {
-        ctx.fillStyle = dark ? "rgba(59, 130, 246, 0.16)" : "rgba(37, 99, 235, 0.12)";
+        ctx.fillStyle = dark ? "rgba(59, 130, 246, 0.26)" : "rgba(37, 99, 235, 0.18)";
         ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       if (row.owned_qty > 0) {
-        ctx.fillStyle = dark ? "rgba(234, 179, 8, 0.14)" : "rgba(202, 138, 4, 0.12)";
+        ctx.fillStyle = dark ? "rgba(234, 179, 8, 0.24)" : "rgba(202, 138, 4, 0.2)";
         ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       ctx.strokeStyle = dark ? "#1f2937" : "#e5e7eb";
       ctx.strokeRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       fillIdentityStrip(ctx, 0, vy, HEATMAP_IDENTITY_STRIP_W, HEATMAP_ROW_HEIGHT, row.color_identity);
+      if (row.pinned) {
+        ctx.fillStyle = dark ? "#a855f7" : "#9333ea";
+        ctx.fillRect(0, vy, 3, HEATMAP_ROW_HEIGHT);
+      } else if (row.watchlisted) {
+        ctx.fillStyle = dark ? "#3b82f6" : "#2563eb";
+        ctx.fillRect(0, vy, 3, HEATMAP_ROW_HEIGHT);
+      } else if (row.owned_qty > 0) {
+        ctx.fillStyle = dark ? "#eab308" : "#ca8a04";
+        ctx.fillRect(0, vy, 3, HEATMAP_ROW_HEIGHT);
+      }
       const midY = vy + HEATMAP_ROW_HEIGHT / 2;
       drawTypeGlyphInStrip(ctx, HEATMAP_IDENTITY_STRIP_W / 2, midY, typeLineToManaGlyph(row.type_line));
       const nameX = HEATMAP_IDENTITY_STRIP_W + 6;

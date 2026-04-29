@@ -392,6 +392,18 @@ export function getHeatmapData(
     ]),
   );
 
+  /** Total owned copies per oracle (any printing), for row chrome — not limited to visible set columns. */
+  const ownedQtyByOracleRows = db
+    .prepare(
+      `SELECT p.oracle_id AS oid, COUNT(*) AS n
+       FROM owned_cards o
+       INNER JOIN printings p ON p.scryfall_id = o.scryfall_id
+       WHERE o.user_id = ? AND p.oracle_id IN (${inList})
+       GROUP BY p.oracle_id`,
+    )
+    .all(userId, ...oracleIds) as { oid: string; n: number }[];
+  const ownedQtyByOracle = new Map(ownedQtyByOracleRows.map((r) => [r.oid, r.n]));
+
   const wl = new Set(
     (
       db
@@ -401,6 +413,15 @@ export function getHeatmapData(
         .all(userId, ...oracleIds) as { scryfall_id: string }[]
     ).map((x) => x.scryfall_id),
   );
+
+  const watchlistedOracleRows = db
+    .prepare(
+      `SELECT DISTINCT p.oracle_id AS oid FROM watchlist w
+       INNER JOIN printings p ON p.scryfall_id = w.scryfall_id
+       WHERE w.user_id = ? AND p.oracle_id IN (${inList})`,
+    )
+    .all(userId, ...oracleIds) as { oid: string }[];
+  const watchlistedOracles = new Set(watchlistedOracleRows.map((r) => r.oid));
 
   const pin = new Set(
     (
@@ -498,19 +519,9 @@ export function getHeatmapData(
       }
     }
 
-    let owned_qty = 0;
-    for (const c of cells) {
-      if (!c) continue;
-      owned_qty += ownedMap.get(c.scryfall_id) ?? 0;
-    }
+    const owned_qty = ownedQtyByOracle.get(oid) ?? 0;
 
-    let watchlisted = false;
-    for (const c of cells) {
-      if (c && wl.has(c.scryfall_id)) {
-        watchlisted = true;
-        break;
-      }
-    }
+    const watchlisted = watchlistedOracles.has(oid);
 
     const gkRaw = card._gk;
     const group_key =

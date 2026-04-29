@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CONDITION_VALUE_MULT } from "@/lib/constants";
+import type { PortfolioSummary } from "@/lib/portfolio-summary";
 
 type Row = {
   id: string;
@@ -86,7 +87,7 @@ export function OwnedListPanel({ embedded = false, className }: OwnedListPanelPr
     queryFn: async () => {
       const res = await fetch("/api/portfolio/summary");
       if (!res.ok) throw new Error();
-      return res.json() as Promise<{ total_usd: number; copies: number }>;
+      return res.json() as Promise<PortfolioSummary>;
     },
   });
 
@@ -111,6 +112,7 @@ export function OwnedListPanel({ embedded = false, className }: OwnedListPanelPr
       qc.invalidateQueries({ queryKey: ["owned-list"] });
       qc.invalidateQueries({ queryKey: ["portfolio"] });
       qc.invalidateQueries({ queryKey: ["heatmap"] });
+      qc.invalidateQueries({ queryKey: ["heatmap-facets"] });
     },
   });
 

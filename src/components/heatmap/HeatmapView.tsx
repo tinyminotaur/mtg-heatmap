@@ -35,6 +35,7 @@ import { HeatmapGuideDialog } from "./HeatmapGuideDialog";
 import { OwnedListPanel } from "@/components/owned/OwnedListPanel";
 import { WatchlistListPanel } from "@/components/watchlist/WatchlistListPanel";
 import { Library, Maximize2, Palette, Search, Star, X } from "lucide-react";
+import type { PortfolioSummary } from "@/lib/portfolio-summary";
 import type { SortingState, VisibilityState } from "@tanstack/react-table";
 
 /** Toggle `qr=` / `qc=` comma lists in the URL (session quick-pins). */
@@ -280,6 +281,16 @@ export function HeatmapView() {
   const router = useRouter();
   const sp = useSearchParams();
   const qc = useQueryClient();
+
+  const invalidateAfterCollectionChange = useCallback(async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["heatmap"] }),
+      qc.invalidateQueries({ queryKey: ["heatmap-facets"] }),
+      qc.invalidateQueries({ queryKey: ["portfolio"] }),
+      qc.invalidateQueries({ queryKey: ["owned-list"] }),
+      qc.invalidateQueries({ queryKey: ["watchlist"] }),
+    ]);
+  }, [qc]);
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme !== "light";
   const [isMobile, setIsMobile] = useState(false);
@@ -301,6 +312,16 @@ export function HeatmapView() {
     queryFn: () => fetchJson(`/api/heatmap?${queryString}`),
     // Keep rendering the previous heatmap while the next one loads (no “blink out”).
     placeholderData: keepPreviousData,
+  });
+
+  const { data: portfolioSummary } = useQuery<PortfolioSummary>({
+    queryKey: ["portfolio"],
+    queryFn: async () => {
+      const res = await fetch("/api/portfolio/summary");
+      if (!res.ok) throw new Error("portfolio");
+      return res.json();
+    },
+    staleTime: 10_000,
   });
 
   const { data: statusData } = useQuery<StatusResponse>({
@@ -584,9 +605,8 @@ export function HeatmapView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scryfall_id: cell.scryfall_id }),
     });
-    await qc.invalidateQueries({ queryKey: ["heatmap"] });
-    await qc.invalidateQueries({ queryKey: ["portfolio"] });
-  }, [qc, rows, colIndex, rowIndex]);
+    await invalidateAfterCollectionChange();
+  }, [invalidateAfterCollectionChange, rows, colIndex, rowIndex]);
 
   const decOwned = useCallback(async () => {
     const cell = rows[rowIndex]?.cells[colIndex];
@@ -596,9 +616,8 @@ export function HeatmapView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scryfall_id: cell.scryfall_id, action: "remove" }),
     });
-    await qc.invalidateQueries({ queryKey: ["heatmap"] });
-    await qc.invalidateQueries({ queryKey: ["portfolio"] });
-  }, [qc, rows, colIndex, rowIndex]);
+    await invalidateAfterCollectionChange();
+  }, [invalidateAfterCollectionChange, rows, colIndex, rowIndex]);
 
   const toggleWatch = useCallback(async () => {
     const cell = rows[rowIndex]?.cells[colIndex];
@@ -608,8 +627,8 @@ export function HeatmapView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scryfall_id: cell.scryfall_id }),
     });
-    await qc.invalidateQueries({ queryKey: ["heatmap"] });
-  }, [qc, rows, colIndex, rowIndex]);
+    await invalidateAfterCollectionChange();
+  }, [invalidateAfterCollectionChange, rows, colIndex, rowIndex]);
 
   const togglePin = useCallback(async () => {
     const row = rows[rowIndex];
@@ -619,8 +638,8 @@ export function HeatmapView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ oracle_id: row.oracle_id }),
     });
-    await qc.invalidateQueries({ queryKey: ["heatmap"] });
-  }, [qc, rows, rowIndex]);
+    await invalidateAfterCollectionChange();
+  }, [invalidateAfterCollectionChange, rows, rowIndex]);
 
   const toggleQuickPinRowForOracle = useCallback(
     (oracleId: string) => {
@@ -1051,10 +1070,41 @@ export function HeatmapView() {
             MTG Value Map
           </h1>
         </div>
-        <nav
-          className="flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:gap-2"
-          aria-label="Shortcuts and pages"
-        >
+        <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-end">
+          {portfolioSummary ? (
+            <div
+              className="order-2 w-full text-right text-[11px] leading-snug text-muted-foreground sm:order-1 sm:w-auto sm:max-w-[28rem]"
+              title="Portfolio-wide totals (not limited to the current heatmap filters)"
+            >
+              <div className="font-mono text-foreground">
+                <span className="text-amber-100/95">
+                  ${portfolioSummary.total_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="mx-1 text-muted-foreground">·</span>
+                <span>{portfolioSummary.unique_oracles} owned</span>
+                <span className="mx-1 text-muted-foreground">·</span>
+                <span>{portfolioSummary.copies} copies</span>
+              </div>
+              <div>
+                <span>{portfolioSummary.watchlist_entries} watchlist</span>
+                <span className="mx-1">·</span>
+                <span className="tabular-nums">
+                  ${portfolioSummary.watchlist_total_usd.toLocaleString(undefined, { maximumFractionDigits: 0 })} WL
+                </span>
+                <span className="mx-1">·</span>
+                <span>{portfolioSummary.pinned_oracles} pinned</span>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="order-2 hidden h-10 w-full max-w-xs animate-pulse rounded-md bg-muted/30 sm:order-1 sm:block"
+              aria-hidden
+            />
+          )}
+          <nav
+            className="order-1 flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:order-2 sm:gap-2"
+            aria-label="Shortcuts and pages"
+          >
           <button
             type="button"
             className="header-toolbar-action cursor-pointer"
@@ -1085,6 +1135,7 @@ export function HeatmapView() {
             </span>
           </button>
         </nav>
+        </div>
       </header>
 
       <HeatmapFilterBar
