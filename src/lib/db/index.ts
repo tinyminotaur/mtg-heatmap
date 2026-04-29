@@ -35,7 +35,8 @@ export function getDbFilePath(): string {
 }
 
 function resolveDbPath(): string {
-  const raw = process.env.DATABASE_URL ?? "./data/mtg.db";
+  // SQLite catalog DB path (do NOT use DATABASE_URL; Vercel/Neon sets that to Postgres).
+  const raw = process.env.MTG_SQLITE_PATH ?? "./data/mtg.db";
   const cleaned = raw.replace(/^file:/, "").replace(/^\.\//, "");
   return path.isAbsolute(cleaned)
     ? cleaned
@@ -53,8 +54,8 @@ function bundledDbPath(): string {
  */
 function resolveServerlessWritableDbPath(): string | null {
   if (process.env.VERCEL !== "1") return null;
-  /** Explicit DATABASE_URL wins (e.g. hosted libSQL). */
-  if ((process.env.DATABASE_URL ?? "").trim()) return null;
+  /** Explicit SQLite path wins (e.g. local mounted volume). */
+  if ((process.env.MTG_SQLITE_PATH ?? "").trim()) return null;
   const src = bundledDbPath();
   if (!fs.existsSync(src)) return null;
   const id = process.env.VERCEL_DEPLOYMENT_ID ?? "dev";
