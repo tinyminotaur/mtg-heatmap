@@ -186,21 +186,28 @@ export function HeatmapFilterColumns({
           tip={
             sp.get("hlay") === "value"
               ? HEATMAP_FILTER_TIPS.heatmapColumnLayoutValue
-              : HEATMAP_FILTER_TIPS.heatmapColumnLayoutSets
+              : sp.get("hlay") === "printings"
+                ? HEATMAP_FILTER_TIPS.heatmapColumnLayoutPrintings
+                : HEATMAP_FILTER_TIPS.heatmapColumnLayoutSets
           }
           side="right"
         >
           <div className="cursor-help space-y-1.5">
             <Label className="text-xs text-muted-foreground">Heatmap columns</Label>
             <Select
-              value={sp.get("hlay") === "value" ? "value" : "sets"}
-              onValueChange={(v) => setParam("hlay", v === "value" ? "value" : null)}
+              value={
+                sp.get("hlay") === "value" ? "value" : sp.get("hlay") === "printings" ? "printings" : "sets"
+              }
+              onValueChange={(v) =>
+                setParam("hlay", v === "value" ? "value" : v === "printings" ? "printings" : null)
+              }
             >
               <SelectTrigger className="h-8 w-full text-xs">
                 <SelectValue placeholder="Layout" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="sets">One column per set</SelectItem>
+                <SelectItem value="printings">Split foil / promos into separate columns</SelectItem>
                 <SelectItem value="value">Min / median / max columns</SelectItem>
               </SelectContent>
             </Select>

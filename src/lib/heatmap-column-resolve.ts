@@ -42,6 +42,7 @@ function colResolveCacheKey(
     showPinned: f.showPinned,
     quickPinCols: f.quickPinCols ?? [],
     colSort: f.colSort,
+    heatmapColumnLayout: f.heatmapColumnLayout,
   };
   return [
     "v1",
@@ -88,6 +89,25 @@ function sortColumnMeta(cols: ColumnMeta[], mode: string): ColumnMeta[] {
       );
     default:
       return out.sort((a, b) => cmpDate(a, b) || a.code.localeCompare(b.code));
+  }
+}
+
+function variantOrder(v: ColumnMeta["variant"]): number {
+  switch (v) {
+    case "base":
+      return 0;
+    case "nonfoil":
+      return 1;
+    case "foil":
+      return 2;
+    case "promo_base":
+      return 3;
+    case "promo_nonfoil":
+      return 4;
+    case "promo_foil":
+      return 5;
+    default:
+      return 0;
   }
 }
 
@@ -146,6 +166,21 @@ export function resolveHeatmapColumns(
   const key = colResolveCacheKey(f, cardPred, cardParams, havingSql, havingParams, userId);
   const hit = COL_CACHE.get(key);
   if (hit && now - hit.at < COL_CACHE_TTL_MS) return hit.cols;
+
+  if (f.heatmapColumnLayout === "printings") {
+    const cols = resolveHeatmapPrintingColumns(
+      db,
+      f,
+      cardPred,
+      cardParams,
+      havingSql,
+      havingParams,
+      userId,
+      pinnedOracleIds,
+    );
+    COL_CACHE.set(key, { cols, at: now });
+    return cols;
+  }
 
   let qualSql = `
     SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
@@ -234,5 +269,143 @@ export function resolveHeatmapColumns(
     }
     if (oldestK) COL_CACHE.delete(oldestK);
   }
+  return cols;
+}
+
+type PrintingVariantRow = {
+  set_code: string;
+  name: string;
+  release_date: string | null;
+  set_type: string | null;
+  icon_svg_path: string | null;
+  parent_set_code: string | null;
+  is_promo: number | null;
+  is_foil_only: number | null;
+  is_nonfoil_only: number | null;
+};
+
+function variantForRow(r: PrintingVariantRow): ColumnMeta["variant"] {
+  const promo = Number(r.is_promo ?? 0) > 0;
+  const foilOnly = Number(r.is_foil_only ?? 0) > 0;
+  const nonfoilOnly = Number(r.is_nonfoil_only ?? 0) > 0;
+  if (promo) {
+    if (foilOnly) return "promo_foil";
+    if (nonfoilOnly) return "promo_nonfoil";
+    return "promo_base";
+  }
+  if (foilOnly) return "foil";
+  if (nonfoilOnly) return "nonfoil";
+  return "base";
+}
+
+function variantSuffix(v: ColumnMeta["variant"]): string {
+  switch (v) {
+    case "foil":
+      return " (Foil)";
+    case "nonfoil":
+      return " (Nonfoil)";
+    case "promo_base":
+      return " (Promo)";
+    case "promo_foil":
+      return " (Promo Foil)";
+    case "promo_nonfoil":
+      return " (Promo Nonfoil)";
+    default:
+      return "";
+  }
+}
+
+function resolveHeatmapPrintingColumns(
+  db: Database.Database,
+  f: HeatmapFilters,
+  cardPred: string,
+  cardParams: unknown[],
+  havingSql: string,
+  havingParams: unknown[],
+  _userId: string,
+  pinnedOracleIds?: string[],
+): ColumnMeta[] {
+  // Distinct per-set printing variants (foil/nonfoil/promos), stable across pages.
+  let sql = `
+    SELECT DISTINCT
+      s.code AS set_code,
+      s.name,
+      s.release_date,
+      s.set_type,
+      s.icon_svg_path,
+      s.parent_set_code,
+      COALESCE(p.is_promo, 0) AS is_promo,
+      COALESCE(p.is_foil_only, 0) AS is_foil_only,
+      COALESCE(p.is_nonfoil_only, 0) AS is_nonfoil_only
+    FROM sets s
+    INNER JOIN printings p ON p.set_code = s.code
+    WHERE p.oracle_id IN (SELECT c.oracle_id FROM cards c WHERE ${cardPred} ${havingSql})
+      AND (s.release_date IS NULL OR s.release_date <= ?)
+  `;
+  const params: unknown[] = [...cardParams, ...havingParams, POC_RELEASE_CUTOFF];
+  const scoped = appendColumnScopeFilters(f, sql, params);
+  sql = `${scoped.sql}
+    ORDER BY s.release_date ASC, s.code ASC,
+      COALESCE(p.is_promo, 0) ASC,
+      COALESCE(p.is_nonfoil_only, 0) DESC,
+      COALESCE(p.is_foil_only, 0) ASC
+  `;
+  const rows = db.prepare(sql).all(...scoped.params) as PrintingVariantRow[];
+
+  const byKey = new Map<string, ColumnMeta>();
+  const put = (r: PrintingVariantRow) => {
+    const variant = variantForRow(r);
+    const key = `${r.set_code}::${variant}`;
+    if (byKey.has(key)) return;
+    byKey.set(key, {
+      code: r.set_code,
+      name: `${r.name}${variantSuffix(variant)}`,
+      release_date: r.release_date ?? null,
+      set_type: r.set_type ?? null,
+      icon_svg_path: r.icon_svg_path ?? null,
+      parent_set_code: r.parent_set_code ?? null,
+      year: yearFromDate(r.release_date ?? null),
+      variant,
+    });
+  };
+  for (const r of rows) put(r);
+
+  // Ensure pinned rows can "pull in" their set variants even when they wouldn't qualify by page scope.
+  // (Matches existing behavior for set columns.)
+  if (f.showPinned) {
+    const pins = (pinnedOracleIds ?? []).filter(Boolean);
+    if (pins.length) {
+      const ph = pins.map(() => "?").join(",");
+      let pinSql = `
+        SELECT DISTINCT
+          s.code AS set_code,
+          s.name,
+          s.release_date,
+          s.set_type,
+          s.icon_svg_path,
+          s.parent_set_code,
+          COALESCE(p.is_promo, 0) AS is_promo,
+          COALESCE(p.is_foil_only, 0) AS is_foil_only,
+          COALESCE(p.is_nonfoil_only, 0) AS is_nonfoil_only
+        FROM printings p
+        INNER JOIN sets s ON s.code = p.set_code
+        WHERE p.oracle_id IN (${ph})
+          AND (s.release_date IS NULL OR s.release_date <= ?)
+      `;
+      const pinParams: unknown[] = [...pins, POC_RELEASE_CUTOFF];
+      const pinScoped = appendColumnScopeFilters(f, pinSql, pinParams);
+      pinSql = `${pinScoped.sql} ORDER BY s.release_date ASC, s.code ASC`;
+      const pinRows = db.prepare(pinSql).all(...pinScoped.params) as PrintingVariantRow[];
+      for (const r of pinRows) put(r);
+    }
+  }
+
+  const cols = [...byKey.values()];
+  cols.sort(
+    (a, b) =>
+      (a.release_date ?? "").localeCompare(b.release_date ?? "") ||
+      a.code.localeCompare(b.code) ||
+      variantOrder(a.variant) - variantOrder(b.variant),
+  );
   return cols;
 }

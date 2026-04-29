@@ -1774,6 +1774,24 @@ export function HeatmapView() {
                   ? `${columns[floatingPreview.col]?.name} (row aggregate)`
                   : `${columns[floatingPreview.col]?.name} (${columns[floatingPreview.col]?.release_date})`}
               </div>
+              {urlFilters.heatmapColumnLayout === "printings" && columns[floatingPreview.col]?.variant ? (
+                <div className="text-xs text-muted-foreground">
+                  Variant:{" "}
+                  {columns[floatingPreview.col]!.variant === "base"
+                    ? "Base"
+                    : columns[floatingPreview.col]!.variant === "foil"
+                      ? "Foil"
+                      : columns[floatingPreview.col]!.variant === "nonfoil"
+                        ? "Nonfoil"
+                        : columns[floatingPreview.col]!.variant === "promo_base"
+                          ? "Promo"
+                          : columns[floatingPreview.col]!.variant === "promo_foil"
+                            ? "Promo Foil"
+                            : columns[floatingPreview.col]!.variant === "promo_nonfoil"
+                              ? "Promo Nonfoil"
+                              : "Variant"}
+                </div>
+              ) : null}
               {floatingPreview.cell.source_set_name ? (
                 <div className="text-xs text-muted-foreground">
                   Printing: {floatingPreview.cell.source_set_name}{" "}
@@ -1826,7 +1844,10 @@ export function HeatmapView() {
                   type="button"
                   size="sm"
                   variant={columns[floatingPreview.col]?.quick_pin_column ? "secondary" : "outline"}
-                  disabled={Boolean(columns[floatingPreview.col]?.code?.startsWith("__"))}
+                  disabled={
+                    Boolean(columns[floatingPreview.col]?.code?.startsWith("__")) ||
+                    urlFilters.heatmapColumnLayout === "printings"
+                  }
                   onClick={() => {
                     const code = columns[floatingPreview.col]?.code;
                     if (code) toggleQuickPinColForCode(code);
@@ -1993,7 +2014,7 @@ export function HeatmapView() {
           <div className="flex gap-3">
             {columns[editionHeaderHover.col]!.set_type !== "aggregate" ? (
               <EditionHeaderPreviewIcon
-                key={columns[editionHeaderHover.col]!.code}
+                key={`${columns[editionHeaderHover.col]!.code}:${columns[editionHeaderHover.col]!.variant ?? "base"}`}
                 code={columns[editionHeaderHover.col]!.code}
                 iconSvgPath={columns[editionHeaderHover.col]!.icon_svg_path ?? null}
               />
@@ -2013,6 +2034,24 @@ export function HeatmapView() {
                   ? ` · ${columns[editionHeaderHover.col]!.release_date}`
                   : ""}
               </div>
+              {urlFilters.heatmapColumnLayout === "printings" && columns[editionHeaderHover.col]!.variant ? (
+                <div className="text-xs text-muted-foreground">
+                  Variant:{" "}
+                  {columns[editionHeaderHover.col]!.variant === "base"
+                    ? "Base"
+                    : columns[editionHeaderHover.col]!.variant === "foil"
+                      ? "Foil"
+                      : columns[editionHeaderHover.col]!.variant === "nonfoil"
+                        ? "Nonfoil"
+                        : columns[editionHeaderHover.col]!.variant === "promo_base"
+                          ? "Promo"
+                          : columns[editionHeaderHover.col]!.variant === "promo_foil"
+                            ? "Promo Foil"
+                            : columns[editionHeaderHover.col]!.variant === "promo_nonfoil"
+                              ? "Promo Nonfoil"
+                              : "Variant"}
+                </div>
+              ) : null}
               {columns[editionHeaderHover.col]!.set_type === "aggregate" ? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Row-level aggregate: cheap / typical / expensive pricing across the visible printings for each card,

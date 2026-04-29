@@ -106,6 +106,14 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     expect(f2.cellPriceField).toBe("eur");
   });
 
+  it("round-trips printings column layout", () => {
+    const f = { ...defaultHeatmapFilters, heatmapColumnLayout: "printings" as const };
+    const sp = serializeHeatmapUrlParams(f as HeatmapFilters);
+    expect(sp.get("hlay")).toBe("printings");
+    const f2 = parseHeatmapUrlSearchParams(sp);
+    expect(f2.heatmapColumnLayout).toBe("printings");
+  });
+
   it("round-trips session quick-pin rows and columns (qr / qc)", () => {
     const f = {
       ...defaultHeatmapFilters,

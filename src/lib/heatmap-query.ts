@@ -293,7 +293,8 @@ export async function getHeatmapData(
     pinnedOracleIds,
   );
   const physicalSetCodes = physicalColumns.map((c) => c.code);
-  const valueLayout = fx.heatmapColumnLayout === "value" && physicalSetCodes.length > 0;
+  const visibleSetCodes = [...new Set(physicalSetCodes)];
+  const valueLayout = fx.heatmapColumnLayout === "value" && visibleSetCodes.length > 0;
   const pinRowSet = new Set(fx.quickPinRows);
   const pinColSet = new Set(fx.quickPinCols.map((c) => c.toLowerCase()));
   const heatmapColumns = valueLayout
@@ -304,10 +305,10 @@ export async function getHeatmapData(
       }));
 
   const { sql: havingSql, params: havingParams } = buildHaving(fxUserless, userId, {
-    priceSetCodes: physicalSetCodes,
+    priceSetCodes: visibleSetCodes,
   });
 
-  const visPrint = requirePrintingInHeatmapColumnsSql(physicalSetCodes);
+  const visPrint = requirePrintingInHeatmapColumnsSql(visibleSetCodes);
   const whereTail = `${havingSql} ${gc.sql}${visPrint.sql}`;
   const whereParams = [...havingParams, ...gc.params, ...visPrint.params];
 
@@ -341,7 +342,7 @@ export async function getHeatmapData(
   const total = (db.prepare(countSql).get(...countParams) as { n: number }).n;
 
   const gSelect = gexpr ? `, (${gexpr}) AS _gk` : ", NULL AS _gk";
-  const ordering = buildRowOrdering(fx, physicalSetCodes, gexpr);
+  const ordering = buildRowOrdering(fx, visibleSetCodes, gexpr);
 
   const qpPh = fx.quickPinRows.map(() => "?").join(",");
   const quickPinRowsData =
@@ -432,14 +433,14 @@ export async function getHeatmapData(
   const inList = oracleIds.map(() => "?").join(",");
 
   const restrictPrintingsToVisibleSets =
-    physicalSetCodes.length > 0 && !(valueLayout && fx.valueAggScope === "all");
+    visibleSetCodes.length > 0 && !(valueLayout && fx.valueAggScope === "all");
   const printSql = restrictPrintingsToVisibleSets
     ? `
     SELECT p.*, pc.usd, pc.usd_foil, pc.eur, pc.tix
     FROM printings p
     LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
     WHERE p.oracle_id IN (${inList})
-      AND p.set_code IN (${physicalSetCodes.map(() => "?").join(",")})
+      AND p.set_code IN (${visibleSetCodes.map(() => "?").join(",")})
     ORDER BY p.oracle_id, p.set_code COLLATE NOCASE,
       COALESCE(p.is_promo, 0) ASC,
       COALESCE(p.is_foil_only, 0) ASC,
@@ -467,14 +468,23 @@ export async function getHeatmapData(
   `;
   const printingRows = db
     .prepare(printSql)
-    .all(...oracleIds, ...(restrictPrintingsToVisibleSets ? physicalSetCodes : [])) as PrintingRow[];
+    .all(...oracleIds, ...(restrictPrintingsToVisibleSets ? visibleSetCodes : [])) as PrintingRow[];
 
   const byOracle = new Map<string, Map<string, PrintingRow>>();
   for (const pr of printingRows) {
     if (!byOracle.has(pr.oracle_id)) byOracle.set(pr.oracle_id, new Map());
-    // Some sets have multiple printings (promos/variants). Pick a stable "best" printing per set_code
-    // so cell metadata (image/links/prices) doesn't randomly flip depending on query order.
     const pmap = byOracle.get(pr.oracle_id)!;
+    if (fx.heatmapColumnLayout === "printings") {
+      const promo = Number(pr.is_promo ?? 0) > 0 ? "promo" : "base";
+      const foilOnly = Number(pr.is_foil_only ?? 0) > 0;
+      const nonfoilOnly = Number(pr.is_nonfoil_only ?? 0) > 0;
+      const finish = foilOnly ? "foil" : nonfoilOnly ? "nonfoil" : "base";
+      const key = `${pr.set_code}::${promo}_${finish}`;
+      pmap.set(key, pr);
+      continue;
+    }
+
+    // Sets layout: collapse variants to a stable "best" printing per set_code.
     if (!pmap.has(pr.set_code)) {
       pmap.set(pr.set_code, pr);
       continue;
@@ -535,16 +545,16 @@ export async function getHeatmapData(
     ownedQtyByOracle.set(oid, (ownedQtyByOracle.get(oid) ?? 0) + 1);
   }
 
-  const countAllPrintings = fx.valueAggScope === "all" || physicalSetCodes.length === 0;
+  const countAllPrintings = fx.valueAggScope === "all" || visibleSetCodes.length === 0;
   const printingsCountSql = countAllPrintings
     ? `SELECT oracle_id, COUNT(*) AS n FROM printings WHERE oracle_id IN (${inList}) GROUP BY oracle_id`
-    : `SELECT oracle_id, COUNT(*) AS n FROM printings WHERE oracle_id IN (${inList}) AND set_code IN (${physicalSetCodes.map(() => "?").join(",")}) GROUP BY oracle_id`;
+    : `SELECT oracle_id, COUNT(*) AS n FROM printings WHERE oracle_id IN (${inList}) AND set_code IN (${visibleSetCodes.map(() => "?").join(",")}) GROUP BY oracle_id`;
   const countRows = db
     .prepare(printingsCountSql)
-    .all(...oracleIds, ...(countAllPrintings ? [] : physicalSetCodes)) as { oracle_id: string; n: number }[];
+    .all(...oracleIds, ...(countAllPrintings ? [] : visibleSetCodes)) as { oracle_id: string; n: number }[];
   const printingsCountByOracle = new Map(countRows.map((r) => [r.oracle_id, r.n]));
 
-  const priceSetsForCells = physicalSetCodes;
+  const priceSetsForCells = visibleSetCodes;
   const metaBySet = new Map(physicalColumns.map((c) => [c.code, c]));
   const setDisplayName = (code: string) => metaBySet.get(code)?.name ?? code.toUpperCase();
 
@@ -554,7 +564,7 @@ export async function getHeatmapData(
     const cells: (CellDTO | null)[] = valueLayout
       ? buildValueLayoutCells(
           pmap,
-          physicalSetCodes,
+          visibleSetCodes,
           setDisplayName,
           fx,
           fx.cellPriceField ?? "usd",
@@ -564,15 +574,19 @@ export async function getHeatmapData(
           pinRowSet,
           pinColSet,
         )
-      : physicalSetCodes.map((code) => {
-          const p = pmap.get(code);
+      : physicalColumns.map((col) => {
+          const key =
+            fx.heatmapColumnLayout === "printings" && col.variant
+              ? `${col.code}::${col.variant.startsWith("promo") ? "promo" : "base"}_${col.variant.includes("foil") ? "foil" : col.variant.includes("nonfoil") ? "nonfoil" : "base"}`
+              : col.code;
+          const p = pmap.get(key);
           if (!p) return null;
           const oq = ownedMap.get(p.scryfall_id) ?? 0;
           const wlisted = wl.has(p.scryfall_id);
           const pm = printingMatchesForDisplay(
             fx,
             oid,
-            code,
+            col.code,
             p,
             priceSetsForCells,
             oq,

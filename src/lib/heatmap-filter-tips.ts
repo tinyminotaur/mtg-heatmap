@@ -91,6 +91,10 @@ export const HEATMAP_FILTER_TIPS = {
     "Three columns — Min, Median, Max — computed across the same visible editions as set mode (respects vscope visible vs all).",
     "Each cell shows that aggregate and uses the printing that supplies it; hover preview names the edition.",
   ],
+  heatmapColumnLayoutPrintings: [
+    "Expanded set columns: one column per edition *variant* (e.g. base, foil-only, nonfoil-only, promos) in scope.",
+    "Use this when you want foil and nonfoil versions to be separate columns instead of collapsing to a single “best” printing per set.",
+  ],
   matchFooter: [
     "Match mode affects cells when row filters target printings: strict hides non-matching versions; context dims them but keeps price visible.",
   ],

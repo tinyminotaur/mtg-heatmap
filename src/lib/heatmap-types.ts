@@ -10,4 +10,6 @@ export type ColumnMeta = {
   parent_set_code: string | null;
   /** Session quick-pin column (`qc=`); ignored for aggregate value-layout columns. */
   quick_pin_column?: boolean;
+  /** Printings layout: distinguishes foil/nonfoil/promos within a set. */
+  variant?: "base" | "foil" | "nonfoil" | "promo_base" | "promo_foil" | "promo_nonfoil";
 };

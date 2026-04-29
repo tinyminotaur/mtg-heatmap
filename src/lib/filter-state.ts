@@ -15,7 +15,7 @@ export type SortSlot = {
 export type ValueAggregationScope = "visible" | "all";
 
 /** Sets = one column per edition; value = Min / Median / Max across qualifying printings. */
-export type HeatmapColumnLayout = "sets" | "value";
+export type HeatmapColumnLayout = "sets" | "value" | "printings";
 
 export type MatchDisplayMode = "context" | "strict";
 

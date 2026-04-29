@@ -224,7 +224,10 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     headerSortSetCode: merged.get("hcol")?.trim().toLowerCase() || null,
     headerSortDir:
       merged.get("hdir") === "asc" ? "asc" : merged.get("hdir") === "desc" ? "desc" : null,
-    heatmapColumnLayout: (merged.get("hlay") === "value" ? "value" : "sets") as HeatmapColumnLayout,
+    heatmapColumnLayout: ((v) =>
+      v === "value" ? "value" : v === "printings" ? "printings" : "sets")(
+      (merged.get("hlay") ?? "").trim(),
+    ) as HeatmapColumnLayout,
     cellPriceField: parseHeatmapCellPriceField(merged),
     quickPinRows: parseQuickPinRows(merged),
     quickPinCols: parseQuickPinCols(merged),
@@ -299,7 +302,14 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.headerSortSetCode) out.set("hcol", f.headerSortSetCode);
   if (f.headerSortSetCode && f.headerSortDir) out.set("hdir", f.headerSortDir);
   // Always write `hlay` so it overrides any `s=` blob defaults.
-  out.set("hlay", f.heatmapColumnLayout === "value" ? "value" : "sets");
+  out.set(
+    "hlay",
+    f.heatmapColumnLayout === "value"
+      ? "value"
+      : f.heatmapColumnLayout === "printings"
+        ? "printings"
+        : "sets",
+  );
   if (f.cellPriceField !== "usd") out.set("pm", f.cellPriceField);
   if (f.quickPinRows.length) out.set("qr", f.quickPinRows.join(","));
   if (f.quickPinCols.length) out.set("qc", f.quickPinCols.join(","));
