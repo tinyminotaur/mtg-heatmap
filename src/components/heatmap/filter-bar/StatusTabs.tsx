@@ -11,6 +11,7 @@ type Props = {
     all: number;
     owned: number;
     wishlist: number;
+    pinned: number;
     none: number;
   };
   loading?: boolean;
@@ -22,6 +23,7 @@ const TABS: { id: RowStatusTab; label: string }[] = [
   { id: "all", label: "All" },
   { id: "owned", label: "Owned" },
   { id: "wishlist", label: "Wishlist" },
+  { id: "pinned", label: "Pinned" },
   { id: "none", label: "None" },
 ];
 
@@ -50,6 +52,8 @@ export function StatusTabs({ filters, onTabChange, counts, loading, variant = "d
               ? counts?.owned
               : id === "wishlist"
                 ? counts?.wishlist
+                : id === "pinned"
+                  ? counts?.pinned
                 : counts?.none;
         return (
           <button
