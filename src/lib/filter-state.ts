@@ -4,6 +4,7 @@
  */
 
 import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
+import { defaultColorOrFull } from "@/lib/heatmap/color-lanes";
 
 /** Up to three row-sort keys; value sorts use dir asc | desc. */
 export type SortSlot = {
@@ -20,9 +21,6 @@ export type MatchDisplayMode = "context" | "strict";
 
 export type GroupByMode = "none" | "reserved" | "color" | "type";
 
-/** Color identity filter: any selected pip vs exact identity match (see `cardWhereClause`). */
-export type ColorMatchMode = "any" | "exact";
-
 export type HeatmapFilters = {
   rarity: string[];
   sets: string[];
@@ -36,9 +34,12 @@ export type HeatmapFilters = {
   cmcMax: number | null;
   priceMin: number | null;
   priceMax: number | null;
-  colors: string[];
-  /** URL `colorMode`; default `any` (omit). */
-  colorMode: ColorMatchMode;
+  /** CI must not contain these pips (URL `cln=`). */
+  colorNot: string[];
+  /** CI must satisfy OR across these pips / colorless C (URL `clo=`). */
+  colorOr: string[];
+  /** CI must contain every pip here (URL `cla=`). */
+  colorAnd: string[];
   formats: string[];
   types: string[];
   owned: boolean | null;
@@ -101,8 +102,9 @@ export type FilterState = {
     cmcMax: number | null;
     priceMin: number | null;
     priceMax: number | null;
-    colors: string[];
-    colorMode: ColorMatchMode;
+    colorNot: string[];
+    colorOr: string[];
+    colorAnd: string[];
     formats: string[];
     types: string[];
     owned: boolean | null;
@@ -150,8 +152,9 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   cmcMax: null,
   priceMin: null,
   priceMax: null,
-  colors: [],
-  colorMode: "any",
+  colorNot: [],
+  colorOr: defaultColorOrFull(),
+  colorAnd: [],
   formats: [],
   types: [],
   owned: null,
@@ -194,8 +197,9 @@ export const DEFAULT_FILTER_STATE: FilterState = {
     cmcMax: null,
     priceMin: null,
     priceMax: null,
-    colors: [],
-    colorMode: "any",
+    colorNot: [],
+    colorOr: defaultColorOrFull(),
+    colorAnd: [],
     formats: [],
     types: [],
     owned: null,
@@ -311,8 +315,9 @@ export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
     cmcMax: fs.filters.cmcMax,
     priceMin: fs.filters.priceMin,
     priceMax: fs.filters.priceMax,
-    colors: fs.filters.colors,
-    colorMode: fs.filters.colorMode === "exact" ? "exact" : "any",
+    colorNot: [...fs.filters.colorNot],
+    colorOr: [...fs.filters.colorOr],
+    colorAnd: [...fs.filters.colorAnd],
     formats: fs.filters.formats,
     types: fs.filters.types,
     owned: fs.filters.owned,
@@ -358,8 +363,9 @@ export function heatmapFiltersToFilterState(f: HeatmapFilters): FilterState {
       cmcMax: f.cmcMax,
       priceMin: f.priceMin,
       priceMax: f.priceMax,
-      colors: [...f.colors],
-      colorMode: f.colorMode === "exact" ? "exact" : "any",
+      colorNot: [...f.colorNot],
+      colorOr: [...f.colorOr],
+      colorAnd: [...f.colorAnd],
       formats: [...f.formats],
       types: [...f.types],
       owned: f.owned,

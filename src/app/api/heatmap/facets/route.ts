@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { LOCAL_USER_ID } from "@/lib/constants";
 import type { HeatmapFilters } from "@/lib/filter-state";
+import { defaultColorOrFull } from "@/lib/heatmap/color-lanes";
 import { buildHaving, cardWhereClause, groupCollapsedClause, groupKeyExpr, requirePrintingInHeatmapColumnsSql } from "@/lib/heatmap/sql";
 import { resolveHeatmapColumns } from "@/lib/heatmap-column-resolve";
 import { normalizeFilters } from "@/lib/heatmap/filters";
@@ -15,7 +16,7 @@ function withFacetCleared(
   f: HeatmapFilters,
   facet:
     | "rarity"
-    | "colors"
+    | "colorLanes"
     | "formats"
     | "types"
     | "rowScope",
@@ -23,8 +24,13 @@ function withFacetCleared(
   switch (facet) {
     case "rarity":
       return { ...f, rarity: [] };
-    case "colors":
-      return { ...f, colors: [] };
+    case "colorLanes":
+      return {
+        ...f,
+        colorNot: [],
+        colorOr: defaultColorOrFull(),
+        colorAnd: [],
+      };
     case "formats":
       return { ...f, formats: [] };
     case "types":
@@ -102,7 +108,7 @@ export async function GET(req: NextRequest) {
 
     const base = baseCardWhere(fx, physicalSetCodes);
     const baseForRarity = baseCardWhere(withFacetCleared(fx, "rarity"), physicalSetCodes);
-    const baseForColors = baseCardWhere(withFacetCleared(fx, "colors"), physicalSetCodes);
+    const baseForColors = baseCardWhere(withFacetCleared(fx, "colorLanes"), physicalSetCodes);
     const baseForFormats = baseCardWhere(withFacetCleared(fx, "formats"), physicalSetCodes);
     const baseForTypes = baseCardWhere(withFacetCleared(fx, "types"), physicalSetCodes);
     const baseForRowScope = baseCardWhere(withFacetCleared(fx, "rowScope"), physicalSetCodes);

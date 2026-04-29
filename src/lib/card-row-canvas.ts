@@ -1,16 +1,4 @@
-import { fillStyleForManaGlyph, parseScryfallMana } from "@/lib/mana-for-canvas";
-
-const WUBRG = ["W", "U", "B", "R", "G"] as const;
-
-/** Strong fills for the full-height identity strip (slightly richer than pip pastels). */
-const STRIP: Record<string, string> = {
-  W: "#fde047",
-  U: "#38bdf8",
-  B: "#64748b",
-  R: "#f97316",
-  G: "#22c55e",
-  C: "#d6d3d1",
-};
+import { fillManaCostCircle, parseScryfallMana } from "@/lib/mana-for-canvas";
 
 /** Mana font glyph for card type (Mana CSS ::before content). */
 const TYPE_GLYPH = (code: number) => String.fromCharCode(code);
@@ -110,89 +98,120 @@ export function typeLineToManaGlyph(typeLine: string | null): string | null {
   return null;
 }
 
-/** Paints the left identity column: full row height, solid or WUBRG-order gradient. */
-export function fillIdentityStrip(
+/** Paints the identity column to match the row (no full-height WUBRG block). */
+export function fillIdentityColumnBg(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   width: number,
   height: number,
-  identity: string[],
+  rowBackground: string,
 ) {
-  const order = WUBRG.filter((c) => identity.includes(c));
-  if (order.length === 0) {
-    ctx.fillStyle = "#78716c";
-    ctx.fillRect(x, y, width, height);
-    return;
-  }
-  if (order.length === 1) {
-    ctx.fillStyle = STRIP[order[0]] ?? "#78716c";
-    ctx.fillRect(x, y, width, height);
-    return;
-  }
-  const g = ctx.createLinearGradient(x, y, x + width, y + height);
-  order.forEach((c, i) => {
-    g.addColorStop(i / (order.length - 1), STRIP[c] ?? "#78716c");
-  });
-  ctx.fillStyle = g;
+  ctx.fillStyle = rowBackground;
   ctx.fillRect(x, y, width, height);
 }
 
-/** Centered type icon on the strip with stroke for contrast on any pip color. */
+const TYPE_ICON_DIAM = 18;
+
+/** Type icon: no pip background; glyph only (white on dark UI, dark on light). */
 export function drawTypeGlyphInStrip(
   ctx: CanvasRenderingContext2D,
   stripCenterX: number,
-  baselineY: number,
+  centerY: number,
   typeGlyph: string | null,
+  dark: boolean,
 ) {
   if (!typeGlyph) return;
   ctx.save();
-  ctx.font = '15px "Mana", "MPlantin", system-ui, sans-serif';
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = "rgba(0,0,0,0.55)";
-  ctx.lineJoin = "round";
-  ctx.strokeText(typeGlyph, stripCenterX, baselineY);
-  ctx.fillStyle = "#f8fafc";
-  ctx.fillText(typeGlyph, stripCenterX, baselineY);
+  ctx.fillStyle = dark ? "#ffffff" : "#111827";
+  let fontPx = 13;
+  for (let i = 0; i < 8; i++) {
+    ctx.font = `${fontPx}px "Mana", "MPlantin", system-ui, sans-serif`;
+    if (ctx.measureText(typeGlyph).width <= TYPE_ICON_DIAM - 4 || fontPx <= 8) break;
+    fontPx -= 1;
+  }
+  ctx.fillText(typeGlyph, stripCenterX, centerY);
   ctx.restore();
 }
 
-const MANA_FONT = '13px "Mana", "MPlantin", system-ui, sans-serif';
 const MANA_FALLBACK = "12px ui-monospace, monospace";
+/** Fixed-size circular costs — matches `.ms-cost` 1.3em glyph box (see `mana.css`). */
+const MANA_DIAM = 18;
+const MANA_R = MANA_DIAM / 2;
+const COST_GAP = 2;
+const MANA_SYMBOL_INK = "#111111";
 
-/** Right-aligned mana; each symbol uses its pip color (Mana font draws the circle art). */
+/**
+ * Right-aligned mana: true circles, `ms-cost` frame colors, black symbols (like printed cards / filter).
+ */
 export function drawManaCostRight(
   ctx: CanvasRenderingContext2D,
   rightX: number,
-  baselineY: number,
+  centerY: number,
   mana: string | null,
+  dark: boolean,
 ): number {
   if (!mana) return 0;
+  ctx.save();
   const parts = parseScryfallMana(mana);
-  const advance = 12;
-  let w = 0;
-  for (const p of parts) {
-    if (p.glyphs) w += p.glyphs.length * advance;
-    if (p.literal) w += p.literal.length * 5.5;
-  }
-  let x = rightX - w;
+  type Seg =
+    | { kind: "glyphs"; text: string }
+    | { kind: "literal"; text: string; w: number };
+  const segs: Seg[] = [];
   for (const p of parts) {
     if (p.glyphs) {
-      ctx.font = MANA_FONT;
-      for (const ch of p.glyphs) {
-        ctx.fillStyle = fillStyleForManaGlyph(ch);
-        ctx.fillText(ch, x, baselineY);
-        x += advance;
-      }
-    }
-    if (p.literal) {
-      ctx.font = MANA_FALLBACK;
-      ctx.fillStyle = "#64748b";
-      ctx.fillText(p.literal, x, baselineY);
-      x += p.literal.length * 5.5;
+      segs.push({ kind: "glyphs", text: p.glyphs });
+    } else if (p.literal) {
+      segs.push({
+        kind: "literal",
+        text: p.literal,
+        w: p.literal.length * 5.5,
+      });
     }
   }
-  return w;
+  if (!segs.length) {
+    ctx.restore();
+    return 0;
+  }
+
+  let totalW = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i]!;
+    totalW += s.kind === "glyphs" ? MANA_DIAM : s.w;
+    if (i < segs.length - 1) totalW += COST_GAP;
+  }
+
+  let x = rightX - totalW;
+  ctx.textBaseline = "middle";
+
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i]!;
+    if (s.kind === "glyphs") {
+      const cx = x + MANA_R;
+      fillManaCostCircle(ctx, cx, centerY, MANA_R, s.text);
+      ctx.fillStyle = MANA_SYMBOL_INK;
+      let fontPx = 13;
+      for (let j = 0; j < 8; j++) {
+        ctx.font = `${fontPx}px "Mana", "MPlantin", system-ui, sans-serif`;
+        if (ctx.measureText(s.text).width <= MANA_DIAM - 4 || fontPx <= 8) break;
+        fontPx -= 1;
+      }
+      ctx.textAlign = "center";
+      ctx.fillText(s.text, cx, centerY);
+      ctx.textAlign = "left";
+      x += MANA_DIAM;
+    } else {
+      ctx.font = MANA_FALLBACK;
+      ctx.textAlign = "left";
+      ctx.fillStyle = dark ? "#94a3b8" : "#64748b";
+      ctx.fillText(s.text, x, centerY);
+      x += s.w;
+    }
+    if (i < segs.length - 1) x += COST_GAP;
+  }
+
+  ctx.restore();
+  return totalW;
 }

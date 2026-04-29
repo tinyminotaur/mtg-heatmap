@@ -45,9 +45,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useHeatmapUrlFilters } from "@/hooks/use-heatmap-url-filters";
 import { applyRowStatus, rowStatusFromFilters, type RowStatusTab } from "@/lib/heatmap/row-status";
+import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
 import { buildActiveFilterChips, clearChip } from "@/lib/heatmap/active-filter-chips";
-import { ActiveFiltersRow } from "@/components/heatmap/filter-bar/ActiveFiltersRow";
-import { ColorFilter } from "@/components/heatmap/filter-bar/ColorFilter";
+import { ActiveFiltersRow, type ResultStatsSummary } from "@/components/heatmap/filter-bar/ActiveFiltersRow";
+import { ColorFilter, type ColorLaneIntent } from "@/components/heatmap/filter-bar/ColorFilter";
+import { cycleColorPip, moveColorPip } from "@/lib/heatmap/color-lanes";
 import { FilterSearch } from "@/components/heatmap/filter-bar/FilterSearch";
 import { PriceFilter } from "@/components/heatmap/filter-bar/PriceFilter";
 import { RarityFilter } from "@/components/heatmap/filter-bar/RarityFilter";
@@ -59,6 +61,24 @@ import { StatusTabs } from "@/components/heatmap/filter-bar/StatusTabs";
 export type ViewSessionMeta = { activeViewId: string | null; snapshotQuery: string | null };
 
 const EXTRA_RARITIES = ["special", "bonus"] as const;
+const RARITY_PILLS = ["common", "uncommon", "rare", "mythic"] as const;
+const TYPE_PILLS = ["creature", "instant", "sorcery", "enchantment", "artifact", "land"] as const;
+
+const RARITY_PILL_ON: Record<(typeof RARITY_PILLS)[number], string> = {
+  common: "border-muted-foreground/60 bg-muted text-foreground",
+  uncommon: "border-sky-400/70 bg-sky-500/15 text-sky-950 dark:text-sky-50",
+  rare: "border-amber-500/80 bg-amber-500/15 text-amber-950 dark:text-amber-50",
+  mythic: "border-orange-600/90 bg-gradient-to-br from-orange-500/25 to-rose-600/25 text-foreground",
+};
+
+function clampSavedViewQueryString(qs: string): string {
+  const p = new URLSearchParams(qs);
+  const ps = Number(p.get("pageSize") ?? HEATMAP_MAX_PAGE_SIZE);
+  if (Number.isFinite(ps) && ps > HEATMAP_MAX_PAGE_SIZE) {
+    p.set("pageSize", String(HEATMAP_MAX_PAGE_SIZE));
+  }
+  return p.toString();
+}
 
 type Props = {
   queryString: string;
@@ -82,6 +102,8 @@ type Props = {
   /** Open collection overlays instead of navigating away (heatmap shell). */
   onOpenOwnedPanel?: () => void;
   onOpenWatchlistPanel?: () => void;
+  /** Shown in the filter summary panel (match · rows · page cap). */
+  resultStats: ResultStatsSummary;
 };
 
 const SORT_LABEL: Record<SortSlot["key"], string> = {
@@ -109,8 +131,23 @@ export function HeatmapFilterBar(props: Props) {
     onFiltersRootOpenChange,
     density,
     onDensityChange,
+    resultStats,
   } = props;
   const { filters: f, patch } = useHeatmapUrlFilters(queryString, onReplaceQuery);
+
+  const onColorLaneIntent = useCallback(
+    (intent: ColorLaneIntent) => {
+      patch((b) => {
+        const lanes = { colorNot: b.colorNot, colorOr: b.colorOr, colorAnd: b.colorAnd };
+        const next =
+          intent.kind === "set"
+            ? moveColorPip(lanes, intent.pip, intent.lane)
+            : cycleColorPip(lanes, intent.pip, intent.dir);
+        return { ...b, ...next, page: 0 };
+      });
+    },
+    [patch],
+  );
 
   const facetsUrl = useMemo(() => `/api/heatmap/facets?${queryString}`, [queryString]);
   const { data: facets, isFetching: facetsLoading } = useQuery<{
@@ -152,15 +189,23 @@ export function HeatmapFilterBar(props: Props) {
 
   const selectView = useCallback(
     (v: SavedView) => {
-      onViewSessionChange({ activeViewId: v.id, snapshotQuery: v.query });
-      onReplaceQuery(new URLSearchParams(v.query));
+      const p = new URLSearchParams(clampSavedViewQueryString(v.query));
+      p.set("page", "0");
+      p.set("pageSize", String(HEATMAP_MAX_PAGE_SIZE));
+      const qs = p.toString();
+      onViewSessionChange({ activeViewId: v.id, snapshotQuery: qs });
+      onReplaceQuery(p);
     },
     [onReplaceQuery, onViewSessionChange],
   );
 
   const selectStatusTab = useCallback(
     (tab: RowStatusTab) => {
-      patch((b) => applyRowStatus(b, tab));
+      patch((b) => ({
+        ...applyRowStatus(b, tab),
+        page: 0,
+        pageSize: HEATMAP_MAX_PAGE_SIZE,
+      }));
       onViewSessionChange({ activeViewId: null, snapshotQuery: null });
     },
     [patch, onViewSessionChange],
@@ -168,10 +213,11 @@ export function HeatmapFilterBar(props: Props) {
 
   const saveActiveView = useCallback(() => {
     if (!activeViewId) return;
-    const next = savedViews.map((v) => (v.id === activeViewId ? { ...v, query: queryString } : v));
+    const q = clampSavedViewQueryString(queryString);
+    const next = savedViews.map((v) => (v.id === activeViewId ? { ...v, query: q } : v));
     setSavedViews(next);
     persistSavedViews(next);
-    onViewSessionChange({ activeViewId, snapshotQuery: queryString });
+    onViewSessionChange({ activeViewId, snapshotQuery: q });
   }, [activeViewId, queryString, savedViews, onViewSessionChange]);
 
   const setSortSlots = (slots: SortSlot[]) => {
@@ -191,6 +237,26 @@ export function HeatmapFilterBar(props: Props) {
   };
 
   const primarySort = f.sortSlots[0] ?? { key: "name" as const, dir: null };
+
+  const typePillGlyph = useCallback((t: string): string | null => {
+    // Mana font type icons (same codes as `typeLineToManaGlyph`).
+    switch (t) {
+      case "creature":
+        return String.fromCharCode(0xe61f);
+      case "instant":
+        return String.fromCharCode(0xe621);
+      case "sorcery":
+        return String.fromCharCode(0xe624);
+      case "enchantment":
+        return String.fromCharCode(0xe620);
+      case "artifact":
+        return String.fromCharCode(0xe61e);
+      case "land":
+        return String.fromCharCode(0xe622);
+      default:
+        return null;
+    }
+  }, []);
 
   const rarityCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -253,14 +319,15 @@ export function HeatmapFilterBar(props: Props) {
 
   const createNamedView = useCallback(
     (name: string) => {
+      const q = clampSavedViewQueryString(queryString);
       const v: SavedView = {
         id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
         name,
-        query: queryString,
+        query: q,
       };
       const next = upsertSavedView(savedViews, v);
       setSavedViews(next);
-      onViewSessionChange({ activeViewId: v.id, snapshotQuery: queryString });
+      onViewSessionChange({ activeViewId: v.id, snapshotQuery: q });
     },
     [queryString, savedViews, onViewSessionChange],
   );
@@ -277,11 +344,13 @@ export function HeatmapFilterBar(props: Props) {
     if (!activeViewId) return;
     const next = duplicateSavedView(savedViews, activeViewId);
     const created = next.find((v) => !savedViews.some((o) => o.id === v.id));
-    setSavedViews(next);
-    if (created) {
-      onViewSessionChange({ activeViewId: created.id, snapshotQuery: created.query });
-      onReplaceQuery(new URLSearchParams(created.query));
-    }
+    if (!created) return;
+    const q = clampSavedViewQueryString(created.query);
+    const fixed = next.map((v) => (v.id === created.id ? { ...v, query: q } : v));
+    setSavedViews(fixed);
+    persistSavedViews(fixed);
+    onViewSessionChange({ activeViewId: created.id, snapshotQuery: q });
+    onReplaceQuery(new URLSearchParams(q));
   }, [activeViewId, savedViews, onReplaceQuery, onViewSessionChange]);
 
   const statusCounts = useMemo(
@@ -329,7 +398,7 @@ export function HeatmapFilterBar(props: Props) {
 
   return (
     <div
-      className="flex min-h-0 shrink-0 flex-col overflow-hidden bg-muted/20 text-sm"
+      className="flex min-h-0 shrink-0 flex-col overflow-hidden bg-muted/20 text-xs"
       suppressHydrationWarning
     >
       {/* Locked scope tabs + reorderable saved views */}
@@ -358,89 +427,137 @@ export function HeatmapFilterBar(props: Props) {
 
       {/* Filter bar: sticky on md+, mobile sheet for full controls */}
       <div className="sticky top-0 z-40 border-t border-b border-border bg-muted/25 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-muted/15">
-        <div className="hidden flex-wrap items-center gap-x-2 gap-y-2 px-2 py-2 md:flex md:px-3">
-          <FilterSearch
-            value={f.search}
-            onChange={(v) => patch((b) => ({ ...b, search: v }))}
-          />
-          <ColorFilter
-            selected={f.colors.filter((c) => ["W", "U", "B", "R", "G"].includes(c))}
-            onChange={(colors) =>
-              patch((b) => {
-                const keepC = b.colors.filter((c) => c === "C");
-                return { ...b, colors: [...new Set([...colors, ...keepC])].sort() };
-              })
-            }
-            mode={f.colorMode}
-            onModeChange={(colorMode) => patch((b) => ({ ...b, colorMode }))}
-          />
-          <RarityFilter
-            selected={f.rarity}
-            onChange={(rarity) => patch((b) => ({ ...b, rarity }))}
-          />
-          <SetsPicker
-            selectedSets={f.sets}
-            onSelectedSetsChange={(sets) => patch((b) => ({ ...b, sets }))}
-            includeDigital={f.includeDigital}
-            onPresetReservedRows={() => patch((b) => ({ ...b, reservedOnly: true }))}
-          />
-          <PriceFilter
-            priceMin={f.priceMin}
-            priceMax={f.priceMax}
-            onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
-            cellPriceField={f.cellPriceField}
-            onPriceFieldChange={(cellPriceField) =>
-              patch((b) => ({
-                ...b,
-                cellPriceField:
-                  cellPriceField === "usd_foil" || cellPriceField === "eur" || cellPriceField === "tix"
-                    ? cellPriceField
-                    : "usd",
-              }))
-            }
-          />
-          <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/25 px-2 py-1">
-            <span className="text-xs font-medium text-muted-foreground">Edition</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={f.heatmapColumnLayout === "value"}
-              title={
-                f.heatmapColumnLayout === "value"
-                  ? "Showing Min / Median / Max rollup columns — click for per-edition columns"
-                  : "Showing one column per edition — click for Min / Median / Max rollup"
-              }
-              className={cn(
-                "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                f.heatmapColumnLayout === "value" ? "bg-primary" : "bg-muted",
-              )}
-              onClick={() =>
-                patch((b) => ({
-                  ...b,
-                  heatmapColumnLayout: b.heatmapColumnLayout === "value" ? "sets" : "value",
-                }))
-              }
-            >
-              <span
-                className={cn(
-                  "pointer-events-none inline-block size-4 translate-x-0.5 rounded-full bg-background shadow-sm ring-1 ring-border transition-transform",
-                  f.heatmapColumnLayout === "value" && "translate-x-[1.125rem]",
-                )}
-                aria-hidden
+        <div className="hidden flex-col gap-2 px-2 py-2 md:flex md:px-3">
+          <div className="grid grid-cols-12 gap-3">
+            {/* Left: search + sets/price */}
+            <div className="col-span-12 space-y-2 lg:col-span-5">
+              <FilterSearch
+                className="max-w-none"
+                value={f.search}
+                onChange={(v) => patch((b) => ({ ...b, search: v }))}
               />
-            </button>
-            <span className="text-xs font-medium text-muted-foreground">Rollup</span>
+              <div className="grid grid-cols-2 gap-2">
+                <SetsPicker
+                  className="w-full min-w-0 justify-between"
+                  selectedSets={f.sets}
+                  onSelectedSetsChange={(sets) => patch((b) => ({ ...b, sets }))}
+                  includeDigital={f.includeDigital}
+                  onPresetReservedRows={() => patch((b) => ({ ...b, reservedOnly: true }))}
+                />
+                <PriceFilter
+                  className="w-full min-w-0 justify-between"
+                  priceMin={f.priceMin}
+                  priceMax={f.priceMax}
+                  onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
+                  cellPriceField={f.cellPriceField}
+                  onPriceFieldChange={(cellPriceField) =>
+                    patch((b) => ({
+                      ...b,
+                      cellPriceField:
+                        cellPriceField === "usd_foil" || cellPriceField === "eur" || cellPriceField === "tix"
+                          ? cellPriceField
+                          : "usd",
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Middle: mana lanes + pills + advanced */}
+            <div className="col-span-12 flex items-start gap-2 lg:col-span-7">
+              <div className="w-fit max-w-full shrink-0">
+                <ColorFilter
+                  colorNot={f.colorNot}
+                  colorOr={f.colorOr}
+                  colorAnd={f.colorAnd}
+                  onIntent={onColorLaneIntent}
+                />
+              </div>
+
+              {/* 3 rows total, equal-ish height to mana selector */}
+              <div
+                className="grid shrink-0 grid-cols-4 gap-1 pt-[2px]"
+                style={{ gridAutoRows: "1.5rem" }}
+              >
+                {RARITY_PILLS.map((r) => {
+                  const on = f.rarity.includes(r);
+                  return (
+                    <button
+                      key={r}
+                      type="button"
+                      aria-pressed={on}
+                      className={cn(
+                        "inline-flex h-6 w-[7.25rem] items-center justify-center rounded-full border px-2 text-xs font-semibold capitalize tracking-wide transition-colors",
+                        on ? RARITY_PILL_ON[r] : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60",
+                      )}
+                      onClick={() =>
+                        patch((b) => {
+                          const s = new Set(b.rarity);
+                          if (s.has(r)) s.delete(r);
+                          else s.add(r);
+                          return { ...b, rarity: [...s].sort() };
+                        })
+                      }
+                    >
+                      {r}
+                    </button>
+                  );
+                })}
+
+                {TYPE_PILLS.map((t) => {
+                  const on = f.types.includes(t);
+                  const glyph = typePillGlyph(t);
+                  const label = t.slice(0, 1).toUpperCase() + t.slice(1);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      aria-pressed={on}
+                      className={cn(
+                        "inline-flex h-6 w-[7.25rem] items-center justify-center gap-1.5 rounded-full border px-2 text-xs font-semibold transition-colors",
+                        on
+                          ? "border-border bg-background text-foreground shadow-sm"
+                          : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60",
+                      )}
+                      onClick={() => toggleType(t)}
+                    >
+                      {glyph ? (
+                        <span aria-hidden style={{ fontFamily: "Mana", fontSize: 13, lineHeight: 1 }}>
+                          {glyph}
+                        </span>
+                      ) : null}
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0 gap-1 self-start text-xs"
+                onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
+              >
+                <SlidersHorizontal className="size-3.5" />
+                Advanced
+              </Button>
+            </div>
+
+            {/* Below: active filters + stats */}
+            <ActiveFiltersRow
+              chips={activeChips}
+              statsSummary={resultStats}
+              className={cn(
+                "col-span-12 w-full shrink-0 rounded-lg",
+                activeChips.length
+                  ? "border border-border bg-muted/30 p-2.5"
+                  : "border border-border/50 bg-transparent px-0 py-1.5",
+              )}
+              onRemove={(id) => patch((b) => clearChip(b, id))}
+              onClearAll={onClearFilterState}
+            />
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1 text-xs"
-            onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
-          >
-            <SlidersHorizontal className="size-3.5" />
-            Advanced
-          </Button>
         </div>
 
         <div className="flex items-center gap-2 px-2 py-2 md:hidden">
@@ -471,31 +588,57 @@ export function HeatmapFilterBar(props: Props) {
           </Button>
         </div>
 
-        <ActiveFiltersRow
-          chips={activeChips}
-          onRemove={(id) => patch((b) => clearChip(b, id))}
-          onClearAll={onClearFilterState}
-        />
       </div>
 
       <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
-        <SheetContent side="bottom" className="flex max-h-[85dvh] flex-col gap-0 p-0">
-          <SheetHeader className="border-b border-border px-4 py-3">
-            <SheetTitle>Filters</SheetTitle>
+        <SheetContent side="bottom" className="flex max-h-[85dvh] flex-col gap-0 p-0 text-xs">
+          <SheetHeader className="border-b border-border px-4 py-3 text-left">
+            <SheetTitle className="text-xs font-medium">Filters</SheetTitle>
+            <p className="pt-1 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{resultStats.totalMatches.toLocaleString()}</span> match ·{" "}
+              <span className="font-medium text-foreground">{resultStats.rowsLoaded.toLocaleString()}</span> rows · cap{" "}
+              <span className="font-mono tabular-nums">{resultStats.pageSizeCap}</span>
+            </p>
           </SheetHeader>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3">
+            <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Sets</p>
+                <SetsPicker
+                  className="w-full min-w-0 justify-between"
+                  selectedSets={f.sets}
+                  onSelectedSetsChange={(sets) => patch((b) => ({ ...b, sets }))}
+                  includeDigital={f.includeDigital}
+                  onPresetReservedRows={() => patch((b) => ({ ...b, reservedOnly: true }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Price</p>
+                <PriceFilter
+                  className="w-full min-w-0 justify-between"
+                  priceMin={f.priceMin}
+                  priceMax={f.priceMax}
+                  onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
+                  cellPriceField={f.cellPriceField}
+                  onPriceFieldChange={(cellPriceField) =>
+                    patch((b) => ({
+                      ...b,
+                      cellPriceField:
+                        cellPriceField === "usd_foil" || cellPriceField === "eur" || cellPriceField === "tix"
+                          ? cellPriceField
+                          : "usd",
+                    }))
+                  }
+                />
+              </div>
+            </section>
             <section className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">Colors</p>
               <ColorFilter
-                selected={f.colors.filter((c) => ["W", "U", "B", "R", "G"].includes(c))}
-                onChange={(colors) =>
-                  patch((b) => {
-                    const keepC = b.colors.filter((c) => c === "C");
-                    return { ...b, colors: [...new Set([...colors, ...keepC])].sort() };
-                  })
-                }
-                mode={f.colorMode}
-                onModeChange={(colorMode) => patch((b) => ({ ...b, colorMode }))}
+                colorNot={f.colorNot}
+                colorOr={f.colorOr}
+                colorAnd={f.colorAnd}
+                onIntent={onColorLaneIntent}
               />
             </section>
             <section className="space-y-2">
@@ -510,68 +653,29 @@ export function HeatmapFilterBar(props: Props) {
               <StatusTabs
                 variant="rail"
                 filters={f}
-                onTabChange={(tab) => patch((b) => applyRowStatus(b, tab))}
+                onTabChange={(tab) => {
+                  patch((b) => ({
+                    ...applyRowStatus(b, tab),
+                    page: 0,
+                    pageSize: HEATMAP_MAX_PAGE_SIZE,
+                  }));
+                  onViewSessionChange({ activeViewId: null, snapshotQuery: null });
+                }}
                 counts={statusCounts}
                 loading={facetsLoading}
               />
             </section>
-            <section className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Price</p>
-              <PriceFilter
-                priceMin={f.priceMin}
-                priceMax={f.priceMax}
-                onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
-                cellPriceField={f.cellPriceField}
-                onPriceFieldChange={(cellPriceField) =>
-                  patch((b) => ({
-                    ...b,
-                    cellPriceField:
-                      cellPriceField === "usd_foil" || cellPriceField === "eur" || cellPriceField === "tix"
-                        ? cellPriceField
-                        : "usd",
-                  }))
-                }
-              />
-            </section>
-            <section className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Columns</p>
-              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/25 px-3 py-2">
-                <span className="text-xs text-muted-foreground">Edition</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={f.heatmapColumnLayout === "value"}
-                  className={cn(
-                    "relative inline-flex h-7 w-11 shrink-0 items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    f.heatmapColumnLayout === "value" ? "bg-primary" : "bg-muted",
-                  )}
-                  onClick={() =>
-                    patch((b) => ({
-                      ...b,
-                      heatmapColumnLayout: b.heatmapColumnLayout === "value" ? "sets" : "value",
-                    }))
-                  }
-                >
-                  <span
-                    className={cn(
-                      "pointer-events-none inline-block size-5 translate-x-0.5 rounded-full bg-background shadow-sm ring-1 ring-border transition-transform",
-                      f.heatmapColumnLayout === "value" && "translate-x-[1.25rem]",
-                    )}
-                    aria-hidden
-                  />
-                </button>
-                <span className="text-xs text-muted-foreground">Rollup (Min / Med / Max)</span>
-              </div>
-            </section>
-            <section className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Sets</p>
-              <SetsPicker
-                selectedSets={f.sets}
-                onSelectedSetsChange={(sets) => patch((b) => ({ ...b, sets }))}
-                includeDigital={f.includeDigital}
-                onPresetReservedRows={() => patch((b) => ({ ...b, reservedOnly: true }))}
-              />
-            </section>
+            {activeChips.length > 0 ? (
+              <section className="space-y-2 border-t border-border pt-3">
+                <p className="text-xs font-medium text-muted-foreground">Active filters</p>
+                <ActiveFiltersRow
+                  chips={activeChips}
+                  onRemove={(id) => patch((b) => clearChip(b, id))}
+                  onClearAll={onClearFilterState}
+                  className="rounded-md border border-border bg-muted/15 p-2"
+                />
+              </section>
+            ) : null}
           </div>
           <SheetFooter className="border-t border-border px-4 py-3">
             <Button
@@ -849,21 +953,6 @@ export function HeatmapFilterBar(props: Props) {
                       ))}
                     </div>
                   </div>
-                  <label className="flex cursor-pointer items-center gap-2 text-xs">
-                    <Checkbox
-                      checked={f.colors.includes("C")}
-                      onCheckedChange={(v) => {
-                        const on = Boolean(v);
-                        patch((b) => {
-                          const s = new Set(b.colors);
-                          if (on) s.add("C");
-                          else s.delete("C");
-                          return { ...b, colors: [...s].sort() };
-                        });
-                      }}
-                    />
-                    Colorless color identity (C)
-                  </label>
                   <FilterFieldTip tip={HEATMAP_FILTER_TIPS.specialGroup} side="right">
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">Special group slug</Label>

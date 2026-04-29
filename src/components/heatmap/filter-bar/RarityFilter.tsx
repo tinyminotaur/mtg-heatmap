@@ -7,6 +7,8 @@ const RARITIES = ["common", "uncommon", "rare", "mythic"] as const;
 type Props = {
   selected: string[];
   onChange: (rarities: string[]) => void;
+  variant?: "grid" | "stack";
+  className?: string;
 };
 
 const styles: Record<(typeof RARITIES)[number], string> = {
@@ -19,7 +21,7 @@ const styles: Record<(typeof RARITIES)[number], string> = {
     "data-[on=true]:border-orange-600/90 data-[on=true]:bg-gradient-to-br data-[on=true]:from-orange-500/25 data-[on=true]:to-rose-600/25 data-[on=true]:text-foreground",
 };
 
-export function RarityFilter({ selected, onChange }: Props) {
+export function RarityFilter({ selected, onChange, variant = "grid", className }: Props) {
   const set = new Set(selected);
 
   const toggle = (r: string) => {
@@ -30,7 +32,13 @@ export function RarityFilter({ selected, onChange }: Props) {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div
+      className={cn(
+        "grid w-fit gap-1",
+        variant === "stack" ? "grid-cols-1" : "grid-cols-2",
+        className,
+      )}
+    >
       {RARITIES.map((r) => {
         const on = set.has(r);
         return (
@@ -40,7 +48,7 @@ export function RarityFilter({ selected, onChange }: Props) {
             data-on={on}
             aria-pressed={on}
             className={cn(
-              "rounded-full border border-border px-2 py-1 text-xs font-semibold capitalize tracking-wide transition-colors",
+              "w-full min-w-0 rounded-full border border-border px-2 py-1 text-xs font-semibold capitalize tracking-wide transition-colors",
               !on && "bg-muted/30 text-muted-foreground hover:bg-muted/60",
               styles[r],
             )}

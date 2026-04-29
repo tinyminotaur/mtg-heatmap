@@ -12,6 +12,12 @@ import {
   slotsToPrimarySortString,
 } from "@/lib/filter-state";
 import { decodeAdvancedFiltersParam, encodeAdvancedFiltersParam } from "@/lib/heatmap/advanced-filters";
+import {
+  defaultColorOrFull,
+  isNoOpColorLaneState,
+  mergeExactAndIntoNotLanes,
+  normalizeColorLaneList,
+} from "@/lib/heatmap/color-lanes";
 
 /** Allowed URL param values for controlled Selects (invalid → safe default). */
 export const COL_SORT_OPTIONS = ["release", "release_desc", "code", "name", "type_release"] as const;
@@ -111,8 +117,38 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
   const hiddenSets = merged.get("hideSets")?.split(",").filter(Boolean) ?? [];
   const excludeSetTypes = merged.get("exclTypes")?.split(",").filter(Boolean) ?? [];
   const excludeGroups = merged.get("exclGroups")?.split(",").filter(Boolean) ?? [];
-  const colors = merged.get("colors")?.split(",").filter(Boolean) ?? [];
-  const colorMode = merged.get("colorMode") === "exact" ? "exact" : "any";
+  const legacyColorsRaw = merged.get("colors")?.split(",").filter(Boolean) ?? [];
+  const legacyExact = merged.get("colorMode") === "exact";
+  const clnRaw = merged.get("cln")?.split(",").filter(Boolean) ?? [];
+  const cloRaw = merged.get("clo")?.split(",").filter(Boolean) ?? [];
+  const claRaw = merged.get("cla")?.split(",").filter(Boolean) ?? [];
+  const hasLaneParams =
+    merged.has("cln") || merged.has("clo") || merged.has("cla") || merged.has("clx");
+
+  let colorNot = normalizeColorLaneList(clnRaw);
+  let colorOr = normalizeColorLaneList(cloRaw);
+  let colorAnd = normalizeColorLaneList(claRaw);
+
+  if (!hasLaneParams && legacyColorsRaw.length) {
+    const legacyNorm = normalizeColorLaneList(legacyColorsRaw);
+    if (legacyExact) {
+      colorAnd = legacyNorm;
+    } else {
+      colorOr = legacyNorm;
+    }
+  } else if (!hasLaneParams && !legacyColorsRaw.length) {
+    colorOr = defaultColorOrFull();
+  }
+
+  const wantsExactMigration =
+    merged.get("clx") === "1" || (!hasLaneParams && legacyColorsRaw.length && legacyExact);
+
+  if (wantsExactMigration && colorAnd.length) {
+    const m = mergeExactAndIntoNotLanes(colorNot, colorOr, colorAnd);
+    colorNot = m.colorNot;
+    colorOr = m.colorOr;
+    colorAnd = m.colorAnd;
+  }
   const formats = merged.get("formats")?.split(",").filter(Boolean) ?? [];
   const types = merged.get("types")?.split(",").filter(Boolean) ?? [];
   const advancedFilters = merged.get("filters") ? decodeAdvancedFiltersParam(String(merged.get("filters"))) : null;
@@ -151,8 +187,9 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     hiddenSets,
     excludeSetTypes,
     excludeGroups,
-    colors,
-    colorMode,
+    colorNot,
+    colorOr,
+    colorAnd,
     formats,
     types,
     advancedFilters,
@@ -221,8 +258,11 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.hiddenSets.length) out.set("hideSets", f.hiddenSets.join(","));
   if (f.excludeSetTypes.length) out.set("exclTypes", f.excludeSetTypes.join(","));
   if (f.excludeGroups.length) out.set("exclGroups", f.excludeGroups.join(","));
-  if (f.colors.length) out.set("colors", f.colors.join(","));
-  if (f.colorMode === "exact") out.set("colorMode", "exact");
+  if (!isNoOpColorLaneState(f)) {
+    if (f.colorNot.length) out.set("cln", f.colorNot.join(","));
+    out.set("clo", normalizeColorLaneList(f.colorOr).join(","));
+    if (f.colorAnd.length) out.set("cla", f.colorAnd.join(","));
+  }
   if (f.formats.length) out.set("formats", f.formats.join(","));
   if (f.types.length) out.set("types", f.types.join(","));
   if (f.advancedFilters) out.set("filters", encodeAdvancedFiltersParam(f.advancedFilters));
@@ -282,7 +322,10 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
         k === "sk" ||
         k === "filters" ||
         k === "qr" ||
-        k === "qc"
+        k === "qc" ||
+        k === "cln" ||
+        k === "clo" ||
+        k === "cla"
       )
         overflow[k] = v;
     }

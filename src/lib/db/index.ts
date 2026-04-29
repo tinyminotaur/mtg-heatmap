@@ -4,6 +4,18 @@ import Database from "better-sqlite3";
 import { LOCAL_USER_ID } from "@/lib/constants";
 import { INIT_SQL } from "@/lib/db/schema";
 
+/** Enables `expr REGEXP pattern` (used for mana_cost symbol checks in heatmap SQL). */
+function registerSqliteRegexp(db: Database.Database) {
+  db.function("regexp", { deterministic: true }, (pattern: unknown, value: unknown) => {
+    if (pattern == null || value == null) return 0;
+    try {
+      return new RegExp(String(pattern), "u").test(String(value)) ? 1 : 0;
+    } catch {
+      return 0;
+    }
+  });
+}
+
 let dbInstance: Database.Database | null = null;
 
 /** Older DBs may lack image columns added after first POC schema. */
@@ -63,6 +75,7 @@ export function getDb(): Database.Database {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
+  registerSqliteRegexp(db);
   db.exec(INIT_SQL);
   migratePrintingsImageColumns(db);
   db.prepare(
@@ -77,6 +90,7 @@ export function openDbAt(filePath: string): Database.Database {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const db = new Database(filePath);
   db.pragma("journal_mode = WAL");
+  registerSqliteRegexp(db);
   db.exec(INIT_SQL);
   migratePrintingsImageColumns(db);
   db.prepare(

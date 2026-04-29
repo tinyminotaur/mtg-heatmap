@@ -1,5 +1,6 @@
 import type { HeatmapFilters } from "@/lib/filter-state";
 import { compileAdvancedFiltersToSql } from "@/lib/heatmap/advanced-filters";
+import { colorLaneWhereClause } from "@/lib/heatmap/color-identity-sql";
 
 export function groupKeyExpr(f: HeatmapFilters): string | null {
   switch (f.groupBy) {
@@ -35,8 +36,6 @@ export function requirePrintingInHeatmapColumnsSql(
   };
 }
 
-const WUBRG = new Set(["W", "U", "B", "R", "G"]);
-
 export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unknown[] } {
   const parts: string[] = ["1=1"];
   const params: unknown[] = [];
@@ -51,37 +50,10 @@ export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unkno
     );
     params.push(term, term, term);
   }
-  if (f.colors.length) {
-    const mode = f.colorMode ?? "any";
-    const wubrgSel = f.colors.filter((c): c is string => WUBRG.has(c));
-    const wantColorless = f.colors.includes("C");
-    if (mode === "exact") {
-      if (wubrgSel.length === 0 && wantColorless) {
-        parts.push(
-          "(c.color_identity IS NULL OR c.color_identity = '[]' OR TRIM(c.color_identity) = '')",
-        );
-      } else if (wubrgSel.length) {
-        const sorted = [...new Set(wubrgSel)].sort().join(",");
-        parts.push(
-          "(SELECT GROUP_CONCAT(v, ',') FROM (SELECT j.value AS v FROM json_each(COALESCE(c.color_identity, '[]')) AS j WHERE j.value IN ('W','U','B','R','G') ORDER BY j.value)) = ?",
-        );
-        params.push(sorted);
-      }
-    } else {
-      const ors: string[] = [];
-      for (const col of wubrgSel) {
-        ors.push(`instr(COALESCE(c.color_identity, c.colors, ''), ?) > 0`);
-        params.push(`"${col}"`);
-      }
-      if (wantColorless) {
-        ors.push(`(c.color_identity IS NULL OR c.color_identity = '[]' OR TRIM(c.color_identity) = '')`);
-      }
-      if (ors.length === 1) {
-        parts.push(ors[0]!);
-      } else if (ors.length > 1) {
-        parts.push(`(${ors.join(" OR ")})`);
-      }
-    }
+  const lane = colorLaneWhereClause(f);
+  if (lane) {
+    parts.push(`(${lane.sql})`);
+    params.push(...lane.params);
   }
   if (f.types.length) {
     for (const t of f.types) {

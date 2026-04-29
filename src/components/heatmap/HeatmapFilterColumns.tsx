@@ -367,7 +367,7 @@ export function HeatmapFilterColumns({
           value={setSearch}
           onChange={(e) => setSetSearch(e.target.value)}
           placeholder="Filter sets by name or code…"
-          className="mb-3 h-8 text-sm"
+          className="mb-3 h-9 text-xs"
         />
         <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2 md:max-h-64">
           {(data?.sets ?? []).map((s) => (

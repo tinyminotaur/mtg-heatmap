@@ -2,7 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Plus } from "lucide-react";
+import { CollectionAddDialog } from "@/components/collection/CollectionAddDialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -14,6 +16,12 @@ import {
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CONDITION_VALUE_MULT } from "@/lib/constants";
+import {
+  CARD_CONDITION_CODES,
+  conditionKeyboardLabel,
+  conditionOptionShortLabel,
+  normalizeConditionCode,
+} from "@/lib/card-condition";
 import type { PortfolioSummary } from "@/lib/portfolio-summary";
 
 type Row = {
@@ -80,6 +88,7 @@ export type OwnedListPanelProps = {
 };
 
 export function OwnedListPanel({ embedded = false, className }: OwnedListPanelProps) {
+  const [addOpen, setAddOpen] = useState(false);
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["owned-list"], queryFn: fetchList });
   const { data: summary } = useQuery({
@@ -130,14 +139,21 @@ export function OwnedListPanel({ embedded = false, className }: OwnedListPanelPr
 
   return (
     <div className={cn("flex flex-col gap-4", className)}>
+      <CollectionAddDialog mode="owned" open={addOpen} onOpenChange={setAddOpen} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Owned</h1>
-          <p className="text-sm text-muted-foreground">
-            One row per copy · condition adjusts value (NM=1.0, LP=0.85, …)
+          <p className="max-w-prose text-sm text-muted-foreground">
+            One row per copy. Each row uses the printing&apos;s Scryfall Near Mint (NM) catalog price for USD or
+            foil; &quot;Adj.&quot; multiplies that price by the condition factor (NM ×1.00, LP ×0.85, MP ×0.65, HP
+            ×0.45, DMG ×0.25). Pick a condition below to see the factor spelled out.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" onClick={() => setAddOpen(true)} className="gap-1">
+            <Plus className="size-3.5" aria-hidden />
+            Add cards
+          </Button>
           {!embedded ? (
             <Link href="/" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
               Heatmap
@@ -162,16 +178,35 @@ export function OwnedListPanel({ embedded = false, className }: OwnedListPanelPr
           <TableRow>
             <TableHead>Card</TableHead>
             <TableHead>Set</TableHead>
-            <TableHead>Condition</TableHead>
+            <TableHead className="max-w-[14rem]">
+              <span className="block">Condition</span>
+              <span className="mt-0.5 block text-[10px] font-normal normal-case text-muted-foreground">
+                × NM list price
+              </span>
+            </TableHead>
             <TableHead className="text-right">Current</TableHead>
-            <TableHead className="text-right">Adj.</TableHead>
+            <TableHead className="text-right">
+              <span className="block">Adj.</span>
+              <span className="mt-0.5 block text-[10px] font-normal normal-case text-muted-foreground">
+                after ×
+              </span>
+            </TableHead>
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
+          {!isLoading && !error && (data?.length ?? 0) === 0 ? (
+            <TableRow>
+              <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                No copies yet. Use <span className="font-medium text-foreground">Add cards</span> above, the heatmap
+                with <span className="font-medium text-foreground">O</span> on a cell, or the command palette.
+              </TableCell>
+            </TableRow>
+          ) : null}
           {(data ?? []).map((r) => {
             const cur = r.usd ?? r.usd_foil;
-            const mult = CONDITION_VALUE_MULT[r.condition] ?? 1;
+            const cond = normalizeConditionCode(r.condition);
+            const mult = CONDITION_VALUE_MULT[cond] ?? 1;
             const adj = cur != null ? cur * mult : null;
             return (
               <TableRow key={r.id}>
@@ -179,20 +214,25 @@ export function OwnedListPanel({ embedded = false, className }: OwnedListPanelPr
                 <TableCell className="text-muted-foreground">
                   {r.set_code} · {r.set_name}
                 </TableCell>
-                <TableCell>
+                <TableCell className="max-w-[min(100vw-2rem,22rem)]">
                   <Select
-                    value={r.condition}
+                    value={cond}
                     onValueChange={(v) => {
                       if (v) patch.mutate({ id: r.id, condition: v });
                     }}
                   >
-                    <SelectTrigger className="h-8 w-28">
+                    <SelectTrigger className="h-auto min-h-8 w-full max-w-full py-1.5 text-left text-xs leading-snug [&_*[data-slot=select-value]]:whitespace-normal">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      {["NM", "LP", "MP", "HP", "DMG"].map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
+                    <SelectContent className="max-w-[min(100vw-1rem,24rem)]">
+                      {CARD_CONDITION_CODES.map((c) => (
+                        <SelectItem
+                          key={c}
+                          value={c}
+                          label={conditionKeyboardLabel(c)}
+                          className="items-start whitespace-normal py-2 [&_*]:whitespace-normal"
+                        >
+                          {conditionOptionShortLabel(c)}
                         </SelectItem>
                       ))}
                     </SelectContent>

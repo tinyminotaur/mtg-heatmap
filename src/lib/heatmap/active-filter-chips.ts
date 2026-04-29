@@ -1,4 +1,5 @@
 import type { HeatmapFilters } from "@/lib/filter-state";
+import { colorLanesActive, defaultColorOrFull } from "@/lib/heatmap/color-lanes";
 import { rowStatusFromFilters } from "@/lib/heatmap/row-status";
 
 export type ActiveChipKind =
@@ -44,12 +45,20 @@ export function buildActiveFilterChips(f: HeatmapFilters): ActiveFilterChip[] {
     });
   }
 
-  if (f.colors.length) {
-    const mode = f.colorMode === "exact" ? "exact" : "any";
-    const parts = f.colors.map((c) => WUBRG_LABEL[c] ?? c).join(", ");
+  if (colorLanesActive(f)) {
+    const bits: string[] = [];
+    if (f.colorAnd.length) {
+      bits.push(`Must have ${f.colorAnd.map((c) => WUBRG_LABEL[c] ?? c).join(", ")}`);
+    }
+    if (f.colorOr.length) {
+      bits.push(`Any of ${f.colorOr.map((c) => WUBRG_LABEL[c] ?? c).join(", ")}`);
+    }
+    if (f.colorNot.length) {
+      bits.push(`Exclude ${f.colorNot.map((c) => WUBRG_LABEL[c] ?? c).join(", ")}`);
+    }
     out.push({
       id: "colors",
-      label: `Colors (${mode}): ${parts}`,
+      label: `Color identity: ${bits.join("; ")}`,
       kind: "color",
     });
   }
@@ -162,7 +171,12 @@ export function clearChip(
     case "q":
       return { ...f, search: "" };
     case "colors":
-      return { ...f, colors: [], colorMode: "any" };
+      return {
+        ...f,
+        colorNot: [],
+        colorOr: defaultColorOrFull(),
+        colorAnd: [],
+      };
     case "rarity":
       return { ...f, rarity: [] };
     case "sets":

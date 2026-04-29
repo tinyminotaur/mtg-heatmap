@@ -156,6 +156,53 @@ describe("parseHeatmapUrlSearchParams + serializeHeatmapUrlParams (§11.11)", ()
     expect(again.advancedFilters).toEqual(g);
   });
 
+  it("round-trips color lanes (cln / clo / cla) and never writes clx", () => {
+    const f = {
+      ...defaultHeatmapFilters,
+      colorNot: ["U", "R", "G", "C"],
+      colorOr: ["R", "G"],
+      colorAnd: ["W", "B"],
+    };
+    const sp = serializeHeatmapUrlParams(f as HeatmapFilters);
+    expect(sp.get("cln")).toBe("U,R,G,C");
+    expect(sp.get("clo")).toBe("R,G");
+    expect(sp.get("cla")).toBe("W,B");
+    expect(sp.get("clx")).toBeNull();
+    const again = parseHeatmapUrlSearchParams(sp);
+    expect(again.colorNot).toEqual(["U", "R", "G", "C"]);
+    expect(again.colorOr).toEqual(["R", "G"]);
+    expect(again.colorAnd).toEqual(["W", "B"]);
+  });
+
+  it("migrates legacy clx=1 into Not ∪ complement of And", () => {
+    const a = new URLSearchParams();
+    a.set("cla", "W,B");
+    a.set("clx", "1");
+    a.set("cln", "U");
+    a.set("clo", "R,G");
+    const f = parseHeatmapUrlSearchParams(a);
+    expect(f.colorAnd).toEqual(["W", "B"]);
+    expect(f.colorNot).toEqual(["U", "R", "G", "C"]);
+    expect(f.colorOr).toEqual(["R", "G"]);
+  });
+
+  it("migrates legacy colors + colorMode=exact into And + Not complement", () => {
+    const a = new URLSearchParams();
+    a.set("colors", "R,G");
+    a.set("colorMode", "exact");
+    const f = parseHeatmapUrlSearchParams(a);
+    expect(f.colorAnd).toEqual(["R", "G"]);
+    expect(f.colorNot).toEqual(["W", "U", "B", "C"]);
+    expect(f.colorOr).toEqual([]);
+  });
+
+  it("migrates legacy colors (any) into Or", () => {
+    const a = new URLSearchParams();
+    a.set("colors", "W,C");
+    const f = parseHeatmapUrlSearchParams(a);
+    expect(f.colorOr).toEqual(["W", "C"]);
+  });
+
   it("normalizes advanced filters (trims, dedupes, sorts, flattens)", () => {
     const g: FilterGroup = {
       op: "and",

@@ -130,43 +130,68 @@ export function parseScryfallMana(mana: string | null): { glyphs: string | null;
   return out;
 }
 
-/** Canvas `fillStyle` for one Mana-font PUA glyph (matches in-circle feel from mana.css pip colors). */
-export function fillStyleForManaGlyph(ch: string): string {
-  const cp = ch.codePointAt(0);
-  if (cp === undefined) return "#94a3b8";
+/**
+ * Background for a single mana cost “pill” (matches `mana.css` `.ms-cost` + `.ms-cost.ms-w` …).
+ * Use the first code point; hybrid / multi-glyph strings fall back to default grey.
+ */
+export function msCostCircleBackground(glyphs: string): string {
+  if (!glyphs) return "#beb9b2";
+  const cp = glyphs.codePointAt(0);
+  if (cp === undefined) return "#beb9b2";
   switch (cp) {
     case 0xe600:
-      return "#fef08a";
+      return "#f0f2c0";
     case 0xe601:
-      return "#7dd3fc";
+      return "#b5cde3";
     case 0xe602:
-      return "#94a3b8";
+      return "#aca29a";
     case 0xe603:
-      return "#fb923c";
+      return "#db8664";
     case 0xe604:
-      return "#4ade80";
+      return "#93b483";
     case 0xe904:
-      return "#d4d0c8";
-    case 0xe619:
-      return "#e2e8f0";
+      return "#beb9b2";
     case 0xe615:
     case 0xe616:
     case 0xe617:
-      return "#a8a29e";
     case 0xe61a:
-      return "#cbd5e1";
-    case 0xe907:
-      return "#fbbf24";
+      return "#beb9b2";
+    case 0xe619:
+      return "#e2e8f0";
     case 0xe618:
-      return "#c4b5fd";
+      return "#ddd6fe";
+    case 0xe907:
+      return "#fef3c7";
     case 0xe903:
-      return "#94a3b8";
+      return "#beb9b2";
     case 0xe607:
-      return "#d4a84b";
+      return "#beb9b2";
     default:
       if ((cp >= 0xe605 && cp <= 0xe614) || (cp >= 0xe62a && cp <= 0xe62e) || cp === 0xe900 || cp === 0xe901) {
-        return "#e2e8f0";
+        return "#beb9b2";
       }
-      return "#cbd5e1";
+      return "#beb9b2";
   }
+}
+
+/** Hybrid / split mana glyph — canvas analogue of `.ms-cost` diagonal gradient (generic two-tone). */
+export function fillManaCostCircle(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  glyphs: string,
+): void {
+  const cp = glyphs.codePointAt(0);
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  if (cp === 0xe607) {
+    const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    g.addColorStop(0, "#f0f2c0");
+    g.addColorStop(1, "#b5cde3");
+    ctx.fillStyle = g;
+  } else {
+    ctx.fillStyle = msCostCircleBackground(glyphs);
+  }
+  ctx.fill();
 }

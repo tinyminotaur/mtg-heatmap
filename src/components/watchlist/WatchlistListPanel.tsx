@@ -2,7 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { buttonVariants } from "@/components/ui/button";
+import { useState } from "react";
+import { Plus } from "lucide-react";
+import { CollectionAddDialog } from "@/components/collection/CollectionAddDialog";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -32,6 +35,7 @@ export type WatchlistListPanelProps = {
 };
 
 export function WatchlistListPanel({ embedded = false, className }: WatchlistListPanelProps) {
+  const [addOpen, setAddOpen] = useState(false);
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["watchlist"], queryFn: fetchList });
 
@@ -49,16 +53,23 @@ export function WatchlistListPanel({ embedded = false, className }: WatchlistLis
 
   return (
     <div className={cn("flex flex-col gap-4", className)}>
+      <CollectionAddDialog mode="watchlist" open={addOpen} onOpenChange={setAddOpen} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Watchlist</h1>
           <p className="text-sm text-muted-foreground">Track printings and price change since you added them.</p>
         </div>
-        {!embedded ? (
-          <Link href="/" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-            Heatmap
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" onClick={() => setAddOpen(true)} className="gap-1">
+            <Plus className="size-3.5" aria-hidden />
+            Add cards
+          </Button>
+          {!embedded ? (
+            <Link href="/" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Heatmap
+            </Link>
+          ) : null}
+        </div>
       </div>
       {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
       {error ? <p className="text-sm text-destructive">Could not load watchlist.</p> : null}
@@ -75,6 +86,14 @@ export function WatchlistListPanel({ embedded = false, className }: WatchlistLis
           </TableRow>
         </TableHeader>
         <TableBody>
+          {!isLoading && !error && (data?.length ?? 0) === 0 ? (
+            <TableRow>
+              <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                No printings on your watchlist yet. Use <span className="font-medium text-foreground">Add cards</span>{" "}
+                above or add from the heatmap with <span className="font-medium text-foreground">W</span> on a cell.
+              </TableCell>
+            </TableRow>
+          ) : null}
           {(data ?? []).map((r) => {
             const cur = r.usd ?? r.usd_foil;
             const base = r.added_at_price;

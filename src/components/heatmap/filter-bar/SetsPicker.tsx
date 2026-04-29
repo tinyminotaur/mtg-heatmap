@@ -184,7 +184,7 @@ export function SetsPicker({
         <div className="border-b border-border p-2">
           <Label className="sr-only">Search sets</Label>
           <Input
-            className="h-8 text-sm"
+            className="h-9 text-xs"
             placeholder="Search sets…"
             value={q}
             onChange={(e) => setQ(e.target.value)}

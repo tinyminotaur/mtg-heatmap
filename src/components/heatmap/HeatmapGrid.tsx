@@ -30,7 +30,7 @@ import { scryfallSetIconSvgUrl } from "@/lib/set-icon-url";
 import {
   drawManaCostRight,
   drawTypeGlyphInStrip,
-  fillIdentityStrip,
+  fillIdentityColumnBg,
   typeLineToManaGlyph,
 } from "@/lib/card-row-canvas";
 import type { CellDTO, ColumnMeta, RowDTO } from "@/lib/heatmap-query";
@@ -59,8 +59,12 @@ type Props = {
   matchMode?: "context" | "strict";
   selectedRow: number;
   selectedCol: number;
+  /** Keyboard/focus: highlight the frozen name strip vs a data cell. */
+  selectionBand?: "data" | "name";
+  /** Click frozen name / identity / printings strip for a body row. */
+  onSelectFrozenNameRow?: (row: number) => void;
   onSelectCell: (row: number, col: number) => void;
-  onHoverCell: (
+  onHoverCell?: (
     row: number,
     col: number,
     cell: CellDTO | null,
@@ -97,6 +101,10 @@ type Props = {
   ) => void;
   /** Click frozen “Card” header — opens row sort menu (viewport anchor rect). */
   onCardNameHeaderClick?: (anchor: { left: number; top: number; width: number; height: number }) => void;
+  /** Hide painted “Card” / “Print” labels when an HTML overlay replaces them. */
+  suppressFrozenHeaderLabels?: boolean;
+  /** Data-area cells only (not headers / frozen column). */
+  onDataCellDoubleClick?: (row: number, col: number) => void;
 };
 
 function drawPriceRangeBadge(
@@ -224,6 +232,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     matchMode = "context",
     selectedRow,
     selectedCol,
+    selectionBand = "data",
+    onSelectFrozenNameRow,
     onSelectCell,
     onHoverCell,
     onLeaveGrid,
@@ -234,6 +244,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     onHoverFrozenRowBody,
     onHoverEditionHeader,
     onCardNameHeaderClick,
+    suppressFrozenHeaderLabels = false,
+    onDataCellDoubleClick,
   },
   ref,
 ) {
@@ -580,7 +592,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       }
       ctx.strokeStyle = dark ? "#1f2937" : "#e5e7eb";
       ctx.strokeRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
-      fillIdentityStrip(ctx, 0, vy, HEATMAP_IDENTITY_STRIP_W, HEATMAP_ROW_HEIGHT, row.color_identity);
+      fillIdentityColumnBg(ctx, 0, vy, HEATMAP_IDENTITY_STRIP_W, HEATMAP_ROW_HEIGHT, rowLabelBg);
       if (row.pinned) {
         ctx.fillStyle = dark ? "#a855f7" : "#9333ea";
         ctx.fillRect(0, vy, 3, HEATMAP_ROW_HEIGHT);
@@ -592,7 +604,13 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillRect(0, vy, 3, HEATMAP_ROW_HEIGHT);
       }
       const midY = vy + HEATMAP_ROW_HEIGHT / 2;
-      drawTypeGlyphInStrip(ctx, HEATMAP_IDENTITY_STRIP_W / 2, midY, typeLineToManaGlyph(row.type_line));
+      drawTypeGlyphInStrip(
+        ctx,
+        HEATMAP_IDENTITY_STRIP_W / 2,
+        midY,
+        typeLineToManaGlyph(row.type_line),
+        dark,
+      );
       const nameX = HEATMAP_IDENTITY_STRIP_W + 6;
       ctx.fillStyle = fg;
       ctx.font = `${HEATMAP_CANVAS_FONT.frozenName}px system-ui`;
@@ -601,7 +619,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       const truncated = label.length > maxChars ? `${label.slice(0, maxChars - 1)}…` : label;
       ctx.fillText(truncated, nameX, midY + 4);
       if (row.mana_cost) {
-        drawManaCostRight(ctx, effFrozenColW - 4, midY + 4, row.mana_cost);
+        drawManaCostRight(ctx, effFrozenColW - 4, midY, row.mana_cost, dark);
       }
       // Printings rollup column (right of name column).
       if (effRollupW > 0) {
@@ -634,27 +652,29 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ctx.fillRect(0, 0, effFrozenColW + effRollupW, HEATMAP_HEADER_H);
     ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
     ctx.strokeRect(0, 0, effFrozenColW + effRollupW, HEATMAP_HEADER_H);
-    ctx.fillStyle = muted;
-    ctx.font = `${HEATMAP_CANVAS_FONT.frozenCardHeader}px system-ui`;
-    ctx.fillText("Card", 8, HEATMAP_HEADER_H / 2 + 4);
-    ctx.fillText("▾", effFrozenColW - 12, HEATMAP_HEADER_H / 2 + 4);
-    // Printings header.
-    if (effRollupW > 0) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(effFrozenColW, 0, effRollupW, HEATMAP_HEADER_H);
-      ctx.clip();
-      ctx.strokeStyle = dark ? "#374151" : "#cbd5e1";
-      ctx.beginPath();
-      ctx.moveTo(effFrozenColW + 0.5, 0);
-      ctx.lineTo(effFrozenColW + 0.5, HEATMAP_HEADER_H);
-      ctx.stroke();
+    if (!suppressFrozenHeaderLabels) {
       ctx.fillStyle = muted;
-      ctx.font = `${HEATMAP_CANVAS_FONT.frozenPrintHeader}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("Print", effFrozenColW + effRollupW / 2, HEATMAP_HEADER_H / 2 + 4);
-      ctx.restore();
+      ctx.font = `${HEATMAP_CANVAS_FONT.frozenCardHeader}px system-ui`;
+      ctx.fillText("Card", 8, HEATMAP_HEADER_H / 2 + 4);
+      ctx.fillText("▾", effFrozenColW - 12, HEATMAP_HEADER_H / 2 + 4);
+      // Printings header.
+      if (effRollupW > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(effFrozenColW, 0, effRollupW, HEATMAP_HEADER_H);
+        ctx.clip();
+        ctx.strokeStyle = dark ? "#374151" : "#cbd5e1";
+        ctx.beginPath();
+        ctx.moveTo(effFrozenColW + 0.5, 0);
+        ctx.lineTo(effFrozenColW + 0.5, HEATMAP_HEADER_H);
+        ctx.stroke();
+        ctx.fillStyle = muted;
+        ctx.font = `${HEATMAP_CANVAS_FONT.frozenPrintHeader}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("Print", effFrozenColW + effRollupW / 2, HEATMAP_HEADER_H / 2 + 4);
+        ctx.restore();
+      }
     }
 
     ctx.strokeStyle = dark ? "#4b5563" : "#cbd5e1";
@@ -669,6 +689,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ctx.stroke();
 
     if (
+      selectionBand === "data" &&
       selectedRow >= 0 &&
       selectedCol >= 0 &&
       selectedCol < columns.length &&
@@ -690,8 +711,32 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.strokeRect(clipL + 1, vy + 1, clipR - clipL - 2, HEATMAP_ROW_HEIGHT - 2);
       }
     }
+    if (selectionBand === "name" && selectedRow >= 0 && selectedRow < rows.length) {
+      const vy = HEATMAP_HEADER_H + selectedRow * HEATMAP_ROW_HEIGHT - st;
+      if (vy + HEATMAP_ROW_HEIGHT > HEATMAP_HEADER_H && vy < vh) {
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(1.5, vy + 1.5, effFrozenColW + effRollupW - 3, HEATMAP_ROW_HEIGHT - 3);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- epochs bump draw when fonts/icons finish loading (not referenced inside draw)
-  }, [columns, dark, effFrozenColW, effRollupW, gridH, matchMode, priceMode, rows, selectedCol, selectedRow, setIconsEpoch, manaFontEpoch, totalW]);
+  }, [
+    columns,
+    dark,
+    effFrozenColW,
+    effRollupW,
+    gridH,
+    matchMode,
+    priceMode,
+    rows,
+    selectedCol,
+    selectedRow,
+    selectionBand,
+    setIconsEpoch,
+    manaFontEpoch,
+    suppressFrozenHeaderLabels,
+    totalW,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -799,7 +844,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       frozenColW: effFrozenColW,
       rollupW: effRollupW,
     });
-    onHoverCell(h.r, h.c, cell, a.left + a.width / 2, a.top + a.height / 2, a);
+    onHoverCell?.(h.r, h.c, cell, a.left + a.width / 2, a.top + a.height / 2, a);
   }, [
     rows,
     matchMode,
@@ -816,13 +861,17 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     const el = scrollRef.current;
     const port = portRef.current;
     if (!el) return;
+    const syncViewportW = () => {
+      const next = el.clientWidth;
+      setViewportW((prev) => (prev === next ? prev : next));
+    };
     const onScroll = () => {
       draw();
       refreshHoverAfterScroll();
       onViewportChange?.();
     };
     const onResize = () => {
-      setViewportW(el.clientWidth);
+      syncViewportW();
       draw();
       refreshHoverAfterScroll();
       onViewportChange?.();
@@ -831,7 +880,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     const ro = new ResizeObserver(onResize);
     ro.observe(el);
     if (port) ro.observe(port);
-    setViewportW(el.clientWidth);
+    syncViewportW();
     return () => {
       el.removeEventListener("scroll", onScroll);
       ro.disconnect();
@@ -936,6 +985,21 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         return;
       }
     }
+    const hoverPick = clientPointToHeatmapHover({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      canvasRect: rect,
+      scrollLeft: scrollEl.scrollLeft,
+      scrollTop: scrollEl.scrollTop,
+      columnsLength: columns.length,
+      rowsLength: rows.length,
+      frozenColW: effFrozenColW,
+      rollupW: effRollupW,
+    });
+    if (hoverPick?.kind === "nameColumn" && onSelectFrozenNameRow) {
+      onSelectFrozenNameRow(hoverPick.row);
+      return;
+    }
     const hit = clientPointToCell({
       clientX: e.clientX,
       clientY: e.clientY,
@@ -1026,7 +1090,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       rollupW: effRollupW,
     });
     lastHoverWithCellRef.current = { r: hoverHit.row, c: hoverHit.col, cell: cell! };
-    onHoverCell(hoverHit.row, hoverHit.col, cell!, e.clientX, e.clientY, anchor);
+    onHoverCell?.(hoverHit.row, hoverHit.col, cell!, e.clientX, e.clientY, anchor);
   };
 
   const longPressRef = useRef<{
@@ -1118,6 +1182,26 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
+          onDoubleClick={(e) => {
+            if (!onDataCellDoubleClick) return;
+            const scrollEl = scrollRef.current;
+            const canvas = canvasRef.current;
+            if (!scrollEl || !canvas) return;
+            const rect = canvas.getBoundingClientRect();
+            const hit = clientPointToCell({
+              clientX: e.clientX,
+              clientY: e.clientY,
+              canvasRect: rect,
+              scrollLeft: scrollEl.scrollLeft,
+              scrollTop: scrollEl.scrollTop,
+              columnsLength: columns.length,
+              rowsLength: rows.length,
+              frozenColW: effFrozenColW,
+              rollupW: effRollupW,
+            });
+            if (!hit) return;
+            onDataCellDoubleClick(hit.row, hit.col);
+          }}
         />
       </div>
     </div>

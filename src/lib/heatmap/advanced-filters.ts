@@ -1,3 +1,5 @@
+import { sqlJsonIdentityHasWubrg } from "@/lib/heatmap/color-identity-sql";
+
 export type FilterGroup = {
   op: "and" | "or";
   rules: Array<FilterGroup | FilterRule>;
@@ -345,8 +347,8 @@ export function compileAdvancedFiltersToSql(
         for (const col of cols) {
           if (col === "C") parts.push(`(c.color_identity IS NULL OR c.color_identity = '[]' OR TRIM(c.color_identity) = '')`);
           else {
-            params.push(`"${col}"`);
-            parts.push(`instr(COALESCE(c.color_identity, c.colors, ''), ?) > 0`);
+            params.push(col);
+            parts.push(sqlJsonIdentityHasWubrg());
           }
         }
         const inner = `(${parts.join(" OR ")})`;
