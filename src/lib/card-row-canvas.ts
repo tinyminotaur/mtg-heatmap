@@ -160,7 +160,7 @@ export function drawTypeGlyphInStrip(
 }
 
 const MANA_FONT = '13px "Mana", "MPlantin", system-ui, sans-serif';
-const MANA_FALLBACK = "10px ui-monospace, monospace";
+const MANA_FALLBACK = "12px ui-monospace, monospace";
 
 /** Right-aligned mana; each symbol uses its pip color (Mana font draws the circle art). */
 export function drawManaCostRight(

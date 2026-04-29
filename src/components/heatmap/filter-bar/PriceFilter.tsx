@@ -72,7 +72,7 @@ export function PriceFilter({ priceMin, priceMax, onChange, className }: Props) 
           type="button"
           variant={activePreset === p.id ? "secondary" : "outline"}
           size="sm"
-          className="h-8 px-2 text-[11px]"
+          className="h-8 px-2 text-xs"
           onClick={() => clickPreset(p.id)}
         >
           {p.label}
@@ -93,7 +93,7 @@ export function PriceFilter({ priceMin, priceMax, onChange, className }: Props) 
             type="button"
             variant={!activePreset && (priceMin != null || priceMax != null) ? "secondary" : "outline"}
             size="sm"
-            className="h-8 gap-1 px-2 text-[11px]"
+            className="h-8 gap-1 px-2 text-xs"
           >
             Custom
             <ChevronDown className="size-3 opacity-70" />
@@ -103,7 +103,7 @@ export function PriceFilter({ priceMin, priceMax, onChange, className }: Props) 
           <div className="grid gap-2">
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <Label className="text-[10px]">Min $</Label>
+                <Label className="text-xs">Min $</Label>
                 <Input
                   className="h-8 text-xs"
                   inputMode="decimal"
@@ -112,7 +112,7 @@ export function PriceFilter({ priceMin, priceMax, onChange, className }: Props) 
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-[10px]">Max $</Label>
+                <Label className="text-xs">Max $</Label>
                 <Input
                   className="h-8 text-xs"
                   inputMode="decimal"

@@ -42,7 +42,7 @@ export function HeatmapRowSortMenu({ open, onOpenChange, anchorRect, activeKey, 
               "max-h-[min(70dvh,420px)] w-[min(calc(100vw-2rem),15rem)] overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none ring-1 ring-foreground/10",
             )}
           >
-            <p className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Sort rows by
             </p>
             <div role="menu" className="flex flex-col gap-0.5 pb-1">
@@ -59,7 +59,7 @@ export function HeatmapRowSortMenu({ open, onOpenChange, anchorRect, activeKey, 
                 >
                   <span>{label}</span>
                   {activeKey === key ? (
-                    <span className="text-[10px] text-muted-foreground" aria-hidden>
+                    <span className="text-xs text-muted-foreground" aria-hidden>
                       ✓
                     </span>
                   ) : null}

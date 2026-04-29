@@ -40,6 +40,7 @@ import {
   formatHeatmapCellPriceLabel,
   priceToColor,
 } from "@/lib/price-scale";
+import { HEATMAP_CANVAS_FONT } from "@/lib/typography";
 
 export type HeatmapGridHandle = {
   getDataCellClientRect: (row: number, col: number) => HeatmapCellAnchorRect | null;
@@ -107,10 +108,10 @@ function drawPriceRangeBadge(
   dark: boolean,
   stackIndex: number,
 ) {
-  const ph = 12;
-  const padX = 5;
+  const ph = HEATMAP_CANVAS_FONT.rangeBadgeHeight;
+  const padX = HEATMAP_CANVAS_FONT.rangeBadgePadX;
   ctx.save();
-  ctx.font = "bold 8px system-ui, sans-serif";
+  ctx.font = `bold ${HEATMAP_CANVAS_FONT.rangeBadge}px system-ui, sans-serif`;
   const tw = ctx.measureText(label).width;
   const pw = Math.ceil(tw + padX * 2);
   const bx = vx + HEATMAP_COL_WIDTH - pw - 2;
@@ -160,9 +161,9 @@ function drawCellScopeGlyphs(
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
   const cy = vy + HEATMAP_ROW_HEIGHT / 2;
-  const step = 10;
+  const step = HEATMAP_CANVAS_FONT.scopeGlyphStep;
   const x0 = vx + 3 + step / 2;
-  ctx.font = "9px system-ui, sans-serif";
+  ctx.font = `${HEATMAP_CANVAS_FONT.scopeGlyph}px system-ui, sans-serif`;
   for (let i = 0; i < glyphs.length; i++) {
     ctx.fillStyle = glyphs[i].fill;
     ctx.fillText(glyphs[i].ch, x0 + i * step, cy);
@@ -188,10 +189,11 @@ function drawCellPriceLabel(
   ctx.save();
   ctx.textBaseline = "bottom";
   ctx.textAlign = "right";
-  let fontPx = 8;
-  for (let i = 0; i < 4; i++) {
+  let fontPx = HEATMAP_CANVAS_FONT.cellPriceStart;
+  const minPx = HEATMAP_CANVAS_FONT.cellPriceMin;
+  for (let i = 0; i < 8; i++) {
     ctx.font = `bold ${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    if (ctx.measureText(text).width <= maxW || fontPx <= 6) break;
+    if (ctx.measureText(text).width <= maxW || fontPx <= minPx) break;
     fontPx -= 1;
   }
   if (emphasis) {
@@ -410,7 +412,9 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
           const glyphN =
             (cell.watchlisted ? 1 : 0) + (cell.owned_qty > 0 ? 1 : 0);
-          const leftGlyphReserve = glyphN === 0 ? 0 : glyphN === 1 ? 15 : 26;
+          /** Reserve horizontal space for scope glyphs (see `drawCellScopeGlyphs` step & font size). */
+          const leftGlyphReserve =
+            glyphN === 0 ? 0 : glyphN === 1 ? 20 : 34;
           drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null, leftGlyphReserve);
         }
       }
@@ -464,7 +468,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       ctx.strokeRect(vx, 0, HEATMAP_COL_WIDTH, HEATMAP_HEADER_H);
       const isz = 28;
       const gapIconYear = 5;
-      const yearFontPx = 10;
+      const yearFontPx = HEATMAP_CANVAS_FONT.headerYear;
       /** Stack height: icon + gap + year line (top baseline). */
       const stackH = isz + gapIconYear + yearFontPx * 1.15;
       const blockTop = Math.max(3, Math.floor((HEATMAP_HEADER_H - stackH) / 2));
@@ -484,7 +488,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
         ctx.fillStyle = muted;
-        ctx.font = "9px ui-monospace, system-ui, sans-serif";
+        ctx.font = `${HEATMAP_CANVAS_FONT.aggregateSigma}px ui-monospace, system-ui, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillText("Σ row", vx + HEATMAP_COL_WIDTH / 2, aggTop + aggH + 4);
@@ -515,7 +519,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.lineWidth = 1;
         ctx.stroke();
         ctx.fillStyle = dark ? "#fafafa" : "#18181b";
-        ctx.font = "bold 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+        ctx.font = `bold ${HEATMAP_CANVAS_FONT.headerSetFallback}px ui-monospace, SFMono-Regular, Menlo, monospace`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(c.code.slice(0, 3).toUpperCase(), vx + HEATMAP_COL_WIDTH / 2, iy + isz / 2);
@@ -586,7 +590,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       drawTypeGlyphInStrip(ctx, HEATMAP_IDENTITY_STRIP_W / 2, midY, typeLineToManaGlyph(row.type_line));
       const nameX = HEATMAP_IDENTITY_STRIP_W + 6;
       ctx.fillStyle = fg;
-      ctx.font = "12px system-ui";
+      ctx.font = `${HEATMAP_CANVAS_FONT.frozenName}px system-ui`;
       const label = `${row.is_reserved ? "◆ " : ""}${row.name}`;
       const maxChars = 28;
       const truncated = label.length > maxChars ? `${label.slice(0, maxChars - 1)}…` : label;
@@ -603,7 +607,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.lineTo(rx0 + 0.5, vy + HEATMAP_ROW_HEIGHT);
         ctx.stroke();
         ctx.fillStyle = muted;
-        ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+        ctx.font = `${HEATMAP_CANVAS_FONT.frozenPrintings}px ui-monospace, SFMono-Regular, Menlo, monospace`;
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
         ctx.fillText(String(row.printings_count ?? 0), rx0 + effRollupW - 6, midY + 1);
@@ -615,7 +619,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.strokeStyle = dark ? "#fbbf24" : "#b45309";
         ctx.lineWidth = 1;
         ctx.strokeRect(1.5, vy + 1.5, effFrozenColW + effRollupW - 3, HEATMAP_ROW_HEIGHT - 3);
-        ctx.font = "bold 9px ui-monospace";
+        ctx.font = `bold ${HEATMAP_CANVAS_FONT.frozenOwnedQty}px ui-monospace`;
         ctx.fillText(String(row.owned_qty), effFrozenColW - 14, midY + 3);
       }
     }
@@ -626,7 +630,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     ctx.strokeStyle = dark ? "#374151" : "#e5e7eb";
     ctx.strokeRect(0, 0, effFrozenColW + effRollupW, HEATMAP_HEADER_H);
     ctx.fillStyle = muted;
-    ctx.font = "11px system-ui";
+    ctx.font = `${HEATMAP_CANVAS_FONT.frozenCardHeader}px system-ui`;
     ctx.fillText("Card", 8, HEATMAP_HEADER_H / 2 + 4);
     ctx.fillText("▾", effFrozenColW - 12, HEATMAP_HEADER_H / 2 + 4);
     // Printings header.
@@ -641,7 +645,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       ctx.lineTo(effFrozenColW + 0.5, HEATMAP_HEADER_H);
       ctx.stroke();
       ctx.fillStyle = muted;
-      ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.font = `${HEATMAP_CANVAS_FONT.frozenPrintHeader}px ui-monospace, SFMono-Regular, Menlo, monospace`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("Print", effFrozenColW + effRollupW / 2, HEATMAP_HEADER_H / 2 + 4);

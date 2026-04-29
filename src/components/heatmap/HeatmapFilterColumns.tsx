@@ -233,7 +233,7 @@ export function HeatmapFilterColumns({
                     key={c.code}
                     className="flex cursor-pointer items-center justify-between gap-2 rounded-sm px-1 py-0.5 hover:bg-muted/50"
                   >
-                    <span className="min-w-0 flex-1 truncate text-[11px]">
+                    <span className="min-w-0 flex-1 truncate text-xs">
                       <span className="font-mono">{c.code.toUpperCase()}</span> · {c.name}
                     </span>
                     <Checkbox checked={visible} onCheckedChange={() => toggleVisibleColumn(c.code)} />
@@ -241,7 +241,7 @@ export function HeatmapFilterColumns({
                 );
               })}
           </div>
-          <p className="text-[10px] leading-snug text-muted-foreground">
+          <p className="text-xs leading-snug text-muted-foreground">
             This toggles visibility via URL params (server-side columns). If you’re in “only these sets” mode, toggles update that allowlist.
           </p>
         </div>
@@ -256,27 +256,27 @@ export function HeatmapFilterColumns({
                 <SetIcon code={s.code} iconPath={null} size={18} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-medium leading-tight">{s.name}</div>
-                  <div className="font-mono text-[10px] text-muted-foreground">
+                  <div className="font-mono text-xs text-muted-foreground">
                     {s.code} · {s.n.toLocaleString()}
                   </div>
                 </div>
                 <button
                   type="button"
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-[10px]")}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-xs")}
                   onClick={() => toggleHideSet(s.code)}
                 >
                   hide
                 </button>
                 <button
                   type="button"
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-[10px]")}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-xs")}
                   onClick={() => toggleAllowSet(s.code)}
                 >
                   only
                 </button>
                 <button
                   type="button"
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-[10px]")}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 px-2 text-xs")}
                   onClick={() => toggleQuickPinCol(s.code)}
                   aria-pressed={quickPinCols.includes(s.code.toLowerCase())}
                 >
@@ -285,7 +285,7 @@ export function HeatmapFilterColumns({
               </div>
             ))}
           </div>
-          <p className="text-[10px] leading-snug text-muted-foreground">
+          <p className="text-xs leading-snug text-muted-foreground">
             Actions update URL params: <span className="font-mono">hideSets</span>, <span className="font-mono">sets</span>,{" "}
             <span className="font-mono">qc</span>.
           </p>
@@ -316,7 +316,7 @@ export function HeatmapFilterColumns({
                 >
                   <span className="flex flex-col gap-0.5">
                     <span>{g.label}</span>
-                    <span className="text-[11px] font-normal text-muted-foreground">{g.description}</span>
+                    <span className="text-xs font-normal text-muted-foreground">{g.description}</span>
                   </span>
                 </DropdownMenuCheckboxItem>
               ))}
@@ -360,7 +360,7 @@ export function HeatmapFilterColumns({
 
       <div className="border-t border-border pt-4">
         <p className="mb-2 text-xs font-medium text-muted-foreground">Sets · search &amp; per-column</p>
-        <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+        <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
           <strong>Hide</strong> removes that edition from columns. <strong>Only</strong> is an allowlist (checked sets only).
         </p>
         <Input
@@ -378,19 +378,19 @@ export function HeatmapFilterColumns({
               <SetIcon code={s.code} iconPath={s.icon_svg_path} size={20} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-medium leading-tight">{s.name}</div>
-                <div className="font-mono text-[10px] text-muted-foreground">
+                <div className="font-mono text-xs text-muted-foreground">
                   {s.code}
                   {s.set_type ? ` · ${s.set_type}` : ""}
                 </div>
               </div>
-              <label className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+              <label className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                 <Checkbox
                   checked={hiddenSets.includes(s.code)}
                   onCheckedChange={() => toggleHideSet(s.code)}
                 />
                 hide
               </label>
-              <label className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+              <label className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                 <Checkbox
                   checked={allowSets.includes(s.code)}
                   onCheckedChange={() => toggleAllowSet(s.code)}

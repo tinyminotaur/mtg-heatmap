@@ -82,7 +82,7 @@ function EditionHeaderPreviewIcon({ code, iconSvgPath }: { code: string; iconSvg
   if (weakIcon || broken) {
     return (
       <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40 shadow-sm ring-1 ring-black/5 dark:bg-zinc-800/90 dark:ring-white/10">
-        <span className="max-w-[3.25rem] select-none text-center font-mono text-[10px] font-bold leading-none tracking-tight text-foreground">
+        <span className="max-w-[3.25rem] select-none text-center font-mono text-xs font-bold leading-none tracking-tight text-foreground">
           {code.slice(0, 3).toUpperCase()}
         </span>
       </div>
@@ -215,7 +215,7 @@ function HeatmapPriceRangeCallout({
     <div
       className={cn(
         "rounded-md border leading-snug",
-        compact ? "space-y-1 p-2 text-[11px]" : "space-y-1.5 p-2.5 text-xs",
+        compact ? "space-y-1 p-2 text-xs" : "space-y-1.5 p-2.5 text-xs",
         borderClass,
       )}
     >
@@ -258,7 +258,7 @@ function HeatmapPriceRangeCallout({
         <p
           className={cn(
             "font-medium text-cyan-950 dark:text-cyan-100",
-            compact && "text-[11px] leading-snug",
+            compact && "text-xs leading-snug",
           )}
         >
           This cell is the minimum-priced column for this row.
@@ -267,7 +267,7 @@ function HeatmapPriceRangeCallout({
         <p
           className={cn(
             "font-medium text-rose-950 dark:text-rose-100",
-            compact && "text-[11px] leading-snug",
+            compact && "text-xs leading-snug",
           )}
         >
           This cell is the maximum-priced column for this row.
@@ -1085,7 +1085,7 @@ export function HeatmapView() {
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="font-medium leading-none">Owned</span>
               {portfolioSummary ? (
-                <span className="font-mono text-[10px] leading-tight text-amber-100/90 tabular-nums">
+                <span className="font-mono text-xs leading-tight text-amber-100/90 tabular-nums">
                   ${portfolioSummary.total_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
                   · {portfolioSummary.unique_oracles} cards · {portfolioSummary.copies} copies
                 </span>
@@ -1104,7 +1104,7 @@ export function HeatmapView() {
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="font-medium leading-none">Watchlist</span>
               {portfolioSummary ? (
-                <span className="font-mono text-[10px] leading-tight text-amber-100/90 tabular-nums">
+                <span className="font-mono text-xs leading-tight text-amber-100/90 tabular-nums">
                   ${portfolioSummary.watchlist_total_usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
                   · {portfolioSummary.watchlist_entries}{" "}
                   {portfolioSummary.watchlist_entries === 1 ? "item" : "items"}
@@ -1298,7 +1298,7 @@ export function HeatmapView() {
                 {floatingPreview.locked ? "Pinned preview" : "Preview"}
               </span>
               {floatingPreview.locked ? (
-                <span className="text-[10px] leading-tight text-muted-foreground">
+                <span className="text-xs leading-tight text-muted-foreground">
                   Stays open while this cell is selected · Esc or click outside to close
                 </span>
               ) : null}
@@ -1353,7 +1353,7 @@ export function HeatmapView() {
                 </div>
               ) : null}
               {floatingPreview.cell.aggregate_note ? (
-                <div className="text-[11px] leading-snug text-muted-foreground">{floatingPreview.cell.aggregate_note}</div>
+                <div className="text-xs leading-snug text-muted-foreground">{floatingPreview.cell.aggregate_note}</div>
               ) : null}
               <div className="font-mono text-xs">
                 USD {floatingPreview.cell.usd ?? "—"} · Foil {floatingPreview.cell.usd_foil ?? "—"}
@@ -1392,7 +1392,7 @@ export function HeatmapView() {
                   {columns[floatingPreview.col]?.quick_pin_column ? "Quick-pin col ✓" : "Quick-pin column"}
                 </Button>
               </div>
-              <p className="text-[10px] leading-snug text-muted-foreground">
+              <p className="text-xs leading-snug text-muted-foreground">
                 Session pins (URL <span className="font-mono">qr</span> / <span className="font-mono">qc</span>): full
                 row or column stays on the grid; printing cells are not dimmed by rarity, price, owned, or watchlist
                 filters.
@@ -1513,13 +1513,13 @@ export function HeatmapView() {
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium text-foreground">{label}</span>
                           {sub ? (
-                            <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                            <span className="block truncate font-mono text-xs text-muted-foreground">
                               {sub}
                             </span>
                           ) : null}
                         </span>
                         {cell.rarity ? (
-                          <span className="shrink-0 capitalize text-[10px] text-muted-foreground">
+                          <span className="shrink-0 capitalize text-xs text-muted-foreground">
                             {cell.rarity}
                           </span>
                         ) : null}
@@ -1555,7 +1555,7 @@ export function HeatmapView() {
                 iconSvgPath={columns[editionHeaderHover.col]!.icon_svg_path ?? null}
               />
             ) : (
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-[10px] font-semibold leading-tight text-muted-foreground">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-xs font-semibold leading-tight text-muted-foreground">
                 Σ
               </div>
             )}
@@ -1581,14 +1581,14 @@ export function HeatmapView() {
                     {humanizeSetType(columns[editionHeaderHover.col]!.set_type)}
                   </p>
                   {columns[editionHeaderHover.col]!.parent_set_code ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       Parent / block code:{" "}
                       <span className="font-mono">
                         {columns[editionHeaderHover.col]!.parent_set_code!.toUpperCase()}
                       </span>
                     </p>
                   ) : null}
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  <p className="text-xs leading-relaxed text-muted-foreground">
                     Each column is one edition; cells are printings of that card from this set (when present in your
                     column scope).
                   </p>
@@ -1654,7 +1654,7 @@ export function HeatmapView() {
                   </div>
                 ) : null}
                 {floatingPreview.cell.aggregate_note ? (
-                  <div className="text-[11px] leading-snug text-muted-foreground">
+                  <div className="text-xs leading-snug text-muted-foreground">
                     {floatingPreview.cell.aggregate_note}
                   </div>
                 ) : null}

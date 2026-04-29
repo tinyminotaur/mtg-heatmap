@@ -40,7 +40,7 @@ export function RarityFilter({ selected, onChange }: Props) {
             data-on={on}
             aria-pressed={on}
             className={cn(
-              "rounded-full border border-border px-2 py-1 text-[10px] font-semibold capitalize tracking-wide transition-colors",
+              "rounded-full border border-border px-2 py-1 text-xs font-semibold capitalize tracking-wide transition-colors",
               !on && "bg-muted/30 text-muted-foreground hover:bg-muted/60",
               styles[r],
             )}

@@ -17,7 +17,7 @@ export function ActiveFiltersRow({ chips, onRemove, onClearAll, onSaveView }: Pr
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-border/60 bg-muted/10 px-2 py-2 sm:px-3">
-      <span className="text-[11px] font-medium text-muted-foreground">Filters</span>
+      <span className="text-xs font-medium text-muted-foreground">Filters</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {chips.map((c) => (
           <Badge

@@ -33,7 +33,7 @@ export function readFrozenBodyRowAnchorRect(args: {
   frozenColW?: number;
   rollupW?: number;
 }): HeatmapCellAnchorRect {
-  const { canvasRect, scrollLeft: sl, scrollTop: st, row } = args;
+  const { canvasRect, scrollTop: st, row } = args;
   const frozenColW = args.frozenColW ?? HEATMAP_FROZEN_COL_W;
   const rollupW = args.rollupW ?? HEATMAP_FROZEN_ROLLUP_W;
   const w = frozenColW + rollupW;

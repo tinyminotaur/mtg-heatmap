@@ -63,7 +63,7 @@ export function ColorFilter({ selected, onChange, mode, onModeChange }: Props) {
         <button
           type="button"
           className={cn(
-            "rounded px-2 py-1 text-[10px] font-medium transition-colors",
+            "rounded px-2 py-1 text-xs font-medium transition-colors",
             mode === "any"
               ? "bg-accent text-accent-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -76,7 +76,7 @@ export function ColorFilter({ selected, onChange, mode, onModeChange }: Props) {
         <button
           type="button"
           className={cn(
-            "rounded px-2 py-1 text-[10px] font-medium transition-colors",
+            "rounded px-2 py-1 text-xs font-medium transition-colors",
             mode === "exact"
               ? "bg-accent text-accent-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",

@@ -390,7 +390,7 @@ export function HeatmapFilterBar(props: Props) {
             onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
           />
           <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/25 px-2 py-1">
-            <span className="text-[10px] font-medium text-muted-foreground">Edition</span>
+            <span className="text-xs font-medium text-muted-foreground">Edition</span>
             <button
               type="button"
               role="switch"
@@ -419,7 +419,7 @@ export function HeatmapFilterBar(props: Props) {
                 aria-hidden
               />
             </button>
-            <span className="text-[10px] font-medium text-muted-foreground">Rollup</span>
+            <span className="text-xs font-medium text-muted-foreground">Rollup</span>
           </div>
           <Button
             type="button"
@@ -579,7 +579,7 @@ export function HeatmapFilterBar(props: Props) {
       {filtersRootOpen ? (
         <div className="max-h-[min(58dvh,520px)] overflow-y-auto border-t border-border px-2 pb-3 pt-2 sm:max-h-[min(70dvh,720px)] sm:px-3">
           {facetSummary ? (
-            <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+            <div className="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
               {facetSummary.year ? <Badge variant="secondary">Year: {facetSummary.year}</Badge> : null}
               {facetSummary.cmc ? <Badge variant="secondary">CMC: {facetSummary.cmc}</Badge> : null}
               {facetSummary.price ? <Badge variant="secondary">Price: {facetSummary.price}</Badge> : null}
@@ -587,12 +587,12 @@ export function HeatmapFilterBar(props: Props) {
           ) : null}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             <section className="rounded-lg border border-border bg-muted/10 p-3 lg:col-span-2">
-              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Display
               </p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground">Price field</span>
+                  <span className="text-xs text-muted-foreground">Price field</span>
                   <Select
                     value={f.cellPriceField}
                     onValueChange={(v) =>
@@ -614,7 +614,7 @@ export function HeatmapFilterBar(props: Props) {
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground">Density</span>
+                  <span className="text-xs text-muted-foreground">Density</span>
                   <Select
                     value={density}
                     onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}
@@ -647,14 +647,14 @@ export function HeatmapFilterBar(props: Props) {
 
             {/* Rows */}
             <section className="rounded-lg border border-border bg-muted/10 p-3">
-              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Rows
               </p>
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,200px)]">
                 <div className="space-y-3 rounded-md border border-border/70 bg-background/40 p-3">
                   <div>
                     <p className="text-xs font-medium text-muted-foreground">Beyond the bar</p>
-                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                       The sticky bar covers search, mana colors, common–mythic rarity, status, USD price, and edition
                       scope. Here: release year, mana value, format legality, type line prefixes, colorless (C), bonus
                       rarities, and row flags that are not status tabs.
@@ -750,7 +750,7 @@ export function HeatmapFilterBar(props: Props) {
                             >
                               <span className="flex w-full items-center justify-between gap-2">
                                 <span>{fmt.key}</span>
-                                <span className="font-mono text-[10px] text-muted-foreground">
+                                <span className="font-mono text-xs text-muted-foreground">
                                   {fmt.n.toLocaleString()}
                                 </span>
                               </span>
@@ -778,7 +778,7 @@ export function HeatmapFilterBar(props: Props) {
                             >
                               <span className="flex w-full items-center justify-between gap-2">
                                 <span className="truncate">{t.key}</span>
-                                <span className="font-mono text-[10px] text-muted-foreground">
+                                <span className="font-mono text-xs text-muted-foreground">
                                   {t.n.toLocaleString()}
                                 </span>
                               </span>
@@ -807,7 +807,7 @@ export function HeatmapFilterBar(props: Props) {
                       <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                         <span>Reserved List only</span>
                         {facets?.rowScope ? (
-                          <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                          <span className="font-mono text-xs text-muted-foreground tabular-nums">
                             {facets.rowScope.reserved.toLocaleString()}
                           </span>
                         ) : null}
@@ -821,20 +821,20 @@ export function HeatmapFilterBar(props: Props) {
                       <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                         <span>Pinned rows only</span>
                         {facets?.rowScope ? (
-                          <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                          <span className="font-mono text-xs text-muted-foreground tabular-nums">
                             {facets.rowScope.pinned.toLocaleString()}
                           </span>
                         ) : null}
                       </span>
                     </label>
-                    <p className="text-[10px] leading-snug text-muted-foreground">
+                    <p className="text-xs leading-snug text-muted-foreground">
                       Owned / watchlist filters use the <span className="font-medium text-foreground">scope tabs</span>{" "}
                       in the bar (not duplicated here).
                     </p>
                   </div>
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-muted-foreground">Bonus rarities</p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       The bar toggles common–mythic. Enable special or bonus when you need them.
                     </p>
                     <div className="flex flex-wrap gap-4">
@@ -843,7 +843,7 @@ export function HeatmapFilterBar(props: Props) {
                           <Checkbox checked={f.rarity.includes(r)} onCheckedChange={() => toggleRarity(r)} />
                           {r}
                           {rarityCounts.has(r) ? (
-                            <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                            <span className="font-mono text-xs text-muted-foreground tabular-nums">
                               {rarityCounts.get(r)!.toLocaleString()}
                             </span>
                           ) : null}
@@ -969,13 +969,13 @@ export function HeatmapFilterBar(props: Props) {
                       </FilterFieldTip>
                     </div>
                     {f.sortSlots.length > 1 ? (
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         +{f.sortSlots.length - 1} tiebreak via <code className="rounded bg-muted px-1">sk=</code>
                       </p>
                     ) : null}
                     <div className="flex flex-wrap items-end gap-2 border-t border-border/60 pt-2">
                       {f.headerSortSetCode ? (
-                        <Badge variant="outline" className="gap-1 font-mono text-[10px]">
+                        <Badge variant="outline" className="gap-1 font-mono text-xs">
                           Col sort: {f.headerSortSetCode.toUpperCase()}
                           <button
                             type="button"
@@ -1067,7 +1067,7 @@ export function HeatmapFilterBar(props: Props) {
 
             {/* Columns */}
             <section className="rounded-lg border border-border bg-muted/10 p-3">
-              <p className="mb-3 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Columns
               </p>
               <div className="space-y-4 rounded-md border border-border/70 bg-background/40 p-3">
@@ -1101,9 +1101,9 @@ export function HeatmapFilterBar(props: Props) {
             </section>
           </div>
 
-          <p className="mt-3 text-[11px] text-muted-foreground">
+          <p className="mt-3 text-xs text-muted-foreground">
             <span className="sr-only">Tip:</span>
-            Press <kbd className="rounded border border-border px-1 font-mono text-[10px]">F</kbd> to toggle this panel.
+            Press <kbd className="rounded border border-border px-1 font-mono text-xs">F</kbd> to toggle this panel.
           </p>
         </div>
       ) : null}

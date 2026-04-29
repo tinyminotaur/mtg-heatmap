@@ -193,13 +193,13 @@ export function SetsPicker({
 
         {catalogTypes.length ? (
           <div className="border-b border-border px-2 py-2">
-            <p className="mb-1.5 text-[10px] font-medium text-muted-foreground">Show set types (multi)</p>
+            <p className="mb-1.5 text-xs font-medium text-muted-foreground">Show set types (multi)</p>
             <div className="flex flex-wrap gap-1">
               <Button
                 type="button"
                 variant={typeFilter.size === 0 ? "secondary" : "outline"}
                 size="sm"
-                className="h-7 px-2 text-[10px]"
+                className="h-7 px-2 text-xs"
                 onClick={clearTypeFilter}
               >
                 All types
@@ -210,7 +210,7 @@ export function SetsPicker({
                   type="button"
                   variant={typeFilter.has(t) ? "secondary" : "outline"}
                   size="sm"
-                  className="h-7 px-2 text-[10px]"
+                  className="h-7 px-2 text-xs"
                   onClick={() => toggleTypeInFilter(t)}
                 >
                   {shortSetTypeLabel(t)}
@@ -243,13 +243,13 @@ export function SetsPicker({
                   />
                   <span className="min-w-0 flex-1 truncate text-xs">
                     {s.name}{" "}
-                    <span className="font-mono text-[10px] text-muted-foreground">
+                    <span className="font-mono text-xs text-muted-foreground">
                       ({s.code.toUpperCase()})
                     </span>
                   </span>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <span
-                      className="max-w-[4.5rem] truncate text-right text-[9px] font-medium uppercase tracking-wide text-muted-foreground"
+                      className="max-w-[4.5rem] truncate text-right text-xs font-medium uppercase tracking-wide text-muted-foreground"
                       title={s.set_type ?? ""}
                     >
                       {tag}
@@ -272,7 +272,7 @@ export function SetsPicker({
                         }}
                       />
                     </span>
-                    <span className="w-9 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">
+                    <span className="w-9 shrink-0 text-right font-mono text-xs text-muted-foreground tabular-nums">
                       {y}
                     </span>
                   </div>
@@ -282,10 +282,10 @@ export function SetsPicker({
           )}
         </div>
         <div className="flex flex-wrap gap-1 border-t border-border p-2">
-          <Button type="button" variant="secondary" size="sm" className="h-7 text-[10px]" onClick={applyPremodern}>
+          <Button type="button" variant="secondary" size="sm" className="h-7 text-xs" onClick={applyPremodern}>
             Pre-Modern
           </Button>
-          <Button type="button" variant="secondary" size="sm" className="h-7 text-[10px]" onClick={applyCore}>
+          <Button type="button" variant="secondary" size="sm" className="h-7 text-xs" onClick={applyCore}>
             Core sets
           </Button>
           {onPresetReservedRows ? (
@@ -293,7 +293,7 @@ export function SetsPicker({
               type="button"
               variant="secondary"
               size="sm"
-              className="h-7 text-[10px]"
+              className="h-7 text-xs"
               onClick={() => {
                 onPresetReservedRows();
                 setOpen(false);
@@ -302,10 +302,10 @@ export function SetsPicker({
               Reserved cards
             </Button>
           ) : null}
-          <Button type="button" variant="secondary" size="sm" className="h-7 text-[10px]" onClick={selectAllVisible}>
+          <Button type="button" variant="secondary" size="sm" className="h-7 text-xs" onClick={selectAllVisible}>
             Select all
           </Button>
-          <Button type="button" variant="outline" size="sm" className="h-7 text-[10px]" onClick={clearAll}>
+          <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={clearAll}>
             Clear all
           </Button>
         </div>

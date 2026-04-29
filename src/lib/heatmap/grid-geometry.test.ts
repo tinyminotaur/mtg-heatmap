@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { clientPointToHeatmapHover } from "./grid-geometry";
-import { HEATMAP_FROZEN_COL_W, HEATMAP_FROZEN_ROLLUP_W, HEATMAP_HEADER_H } from "@/lib/constants";
+import {
+  HEATMAP_COL_WIDTH,
+  HEATMAP_FROZEN_COL_W,
+  HEATMAP_FROZEN_ROLLUP_W,
+  HEATMAP_HEADER_H,
+} from "@/lib/constants";
 
 const fr = (left: number, top: number) =>
   ({ left, top, right: left + 800, bottom: top + 600, width: 800, height: 600, x: left, y: top, toJSON: () => "" }) as DOMRect;
@@ -33,7 +38,7 @@ describe("clientPointToHeatmapHover (frozen column hit-test)", () => {
     const dataPaneLeft = HEATMAP_FROZEN_COL_W + HEATMAP_FROZEN_ROLLUP_W;
     /** Column index ~8 is the first whose left edge clears the frozen strip when sl=400 (see draw math). */
     const col = 9;
-    const clientX = dataPaneLeft + col * 52 - sl + 10;
+    const clientX = dataPaneLeft + col * HEATMAP_COL_WIDTH - sl + 10;
     expect(clientX).toBeGreaterThanOrEqual(dataPaneLeft);
     const bodyY = HEATMAP_HEADER_H + 5;
     const clientY = bodyY;

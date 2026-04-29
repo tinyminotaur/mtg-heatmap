@@ -62,7 +62,7 @@ export function StatusTabs({ filters, onTabChange, counts, loading, variant = "d
             role="tab"
             aria-selected={active}
             className={cn(
-              "rounded-md px-3 py-2 text-[11px] font-medium transition-colors",
+              "rounded-md px-3 py-2 text-xs font-medium transition-colors",
               rail
                 ? active
                   ? "bg-background text-foreground shadow-sm dark:bg-zinc-950 dark:text-zinc-50"

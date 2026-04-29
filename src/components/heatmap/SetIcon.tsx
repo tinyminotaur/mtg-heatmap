@@ -21,7 +21,7 @@ export function SetIcon({
     return (
       <span
         className={cn(
-          "inline-flex shrink-0 items-center justify-center rounded border border-border bg-muted font-mono text-[9px] font-semibold uppercase text-muted-foreground",
+          "inline-flex shrink-0 items-center justify-center rounded border border-border bg-muted font-mono text-xs font-semibold uppercase text-muted-foreground",
           className,
         )}
         style={{ width: size, height: size }}
