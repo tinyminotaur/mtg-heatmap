@@ -22,9 +22,13 @@ export function FilterSearch({
 }: Props) {
   const [local, setLocal] = useState(value);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastEmittedRef = useRef<string>(value);
 
   // Keep local input in sync when `q` changes from URL/back/forward.
   useEffect(() => {
+    // Avoid clobbering fast typing with a slightly-stale URL echo.
+    // Only sync when the change is external (e.g. back/forward / paste into URL).
+    if (value === lastEmittedRef.current) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- controlled sync from URL param `q`
     setLocal(value);
   }, [value]);
@@ -38,6 +42,7 @@ export function FilterSearch({
   const flush = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
+    lastEmittedRef.current = local;
     onChange(local);
   };
 
@@ -45,6 +50,7 @@ export function FilterSearch({
     setLocal(next);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
+      lastEmittedRef.current = next;
       onChange(next);
       timerRef.current = null;
     }, debounceMs);
@@ -70,6 +76,7 @@ export function FilterSearch({
             e.stopPropagation();
             setLocal("");
             if (timerRef.current) clearTimeout(timerRef.current);
+            lastEmittedRef.current = "";
             onChange("");
           }
         }}
@@ -82,6 +89,7 @@ export function FilterSearch({
           onClick={() => {
             setLocal("");
             if (timerRef.current) clearTimeout(timerRef.current);
+            lastEmittedRef.current = "";
             onChange("");
           }}
         >
