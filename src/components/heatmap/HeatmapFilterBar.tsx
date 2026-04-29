@@ -81,7 +81,7 @@ type Props = {
   onPersistNav?: () => void;
   /** Open collection overlays instead of navigating away (heatmap shell). */
   onOpenOwnedPanel?: () => void;
-  onOpenWishlistPanel?: () => void;
+  onOpenWatchlistPanel?: () => void;
 };
 
 const SORT_LABEL: Record<SortSlot["key"], string> = {
@@ -115,7 +115,7 @@ export function HeatmapFilterBar(props: Props) {
   const facetsUrl = useMemo(() => `/api/heatmap/facets?${queryString}`, [queryString]);
   const { data: facets, isFetching: facetsLoading } = useQuery<{
     total: number;
-    status: { all: number; owned: number; wishlist: number; none: number };
+    status: { all: number; owned: number; watchlist: number; none: number };
     rarity: { key: string; n: number }[];
     colorIdentity: { key: string; n: number }[];
     rowScope: { owned: number; watchlist: number; pinned: number; reserved: number };
@@ -143,7 +143,7 @@ export function HeatmapFilterBar(props: Props) {
 
   useEffect(() => {
     if (!savedViews.length) return;
-    const hit = savedViews.find((v) => !v.builtIn && v.query === queryString);
+    const hit = savedViews.find((v) => v.query === queryString);
     if (!hit) return;
     if (activeViewId === hit.id && snapshotQuery === hit.query) return;
     if (activeViewId && snapshotQuery != null && queryString !== snapshotQuery) return;
@@ -288,9 +288,9 @@ export function HeatmapFilterBar(props: Props) {
     () => ({
       all: facets?.status?.all ?? facets?.total ?? 0,
       owned: facets?.status?.owned ?? 0,
-      wishlist: facets?.status?.wishlist ?? 0,
+      watchlist: facets?.status?.watchlist ?? 0,
       pinned: facets?.rowScope?.pinned ?? 0,
-      none: facets?.status?.none ?? 0,
+      reserved: facets?.rowScope?.reserved ?? 0,
     }),
     [facets],
   );
@@ -329,11 +329,11 @@ export function HeatmapFilterBar(props: Props) {
 
   return (
     <div
-      className="flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-muted/20 text-sm"
+      className="flex min-h-0 shrink-0 flex-col overflow-hidden bg-muted/20 text-sm"
       suppressHydrationWarning
     >
-      {/* Unified tabs: status presets + saved views */}
-      <div className="shrink-0 border-b border-border bg-muted/15 px-2 py-1.5 sm:px-3">
+      {/* Locked scope tabs + reorderable saved views */}
+      <div className="shrink-0 bg-muted/10 px-2 py-1.5 sm:px-3">
         <SavedViewTabs
           savedViews={savedViews}
           activeViewId={activeViewId}
@@ -357,7 +357,7 @@ export function HeatmapFilterBar(props: Props) {
       </div>
 
       {/* Filter bar: sticky on md+, mobile sheet for full controls */}
-      <div className="sticky top-0 z-40 border-b border-border bg-muted/25 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-muted/15">
+      <div className="sticky top-0 z-40 border-t border-b border-border bg-muted/25 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-muted/15">
         <div className="hidden flex-wrap items-center gap-x-2 gap-y-2 px-2 py-2 md:flex md:px-3">
           <FilterSearch
             value={f.search}
@@ -828,7 +828,7 @@ export function HeatmapFilterBar(props: Props) {
                       </span>
                     </label>
                     <p className="text-[10px] leading-snug text-muted-foreground">
-                      Owned / wishlist / neither use the <span className="font-medium text-foreground">status tabs</span>{" "}
+                      Owned / watchlist filters use the <span className="font-medium text-foreground">scope tabs</span>{" "}
                       in the bar (not duplicated here).
                     </p>
                   </div>

@@ -1,7 +1,7 @@
 "use client";
 
-import { ChevronDown, Plus } from "lucide-react";
-import { useMemo } from "react";
+import { ChevronDown, GripVertical, Plus } from "lucide-react";
+import { startTransition, useCallback, useMemo, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,7 +10,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { SavedView } from "@/lib/saved-views";
+import {
+  loadSavedViewOrder,
+  orderSavedViews,
+  persistSavedViewOrder,
+  type SavedView,
+} from "@/lib/saved-views";
 import type { RowStatusTab } from "@/lib/heatmap/row-status";
 import { cn } from "@/lib/utils";
 
@@ -23,9 +28,9 @@ type Props = {
   statusCounts?: {
     all: number;
     owned: number;
-    wishlist: number;
+    watchlist: number;
     pinned: number;
-    none: number;
+    reserved: number;
   };
   onSelectStatusTab: (tab: RowStatusTab) => void;
   onSelectView: (view: SavedView) => void;
@@ -36,6 +41,14 @@ type Props = {
   onDuplicateActiveView: () => void;
   onNewView: () => void;
 };
+
+const LOCKED_TABS: { id: RowStatusTab; label: string; countKey: keyof NonNullable<Props["statusCounts"]> }[] = [
+  { id: "all", label: "All", countKey: "all" },
+  { id: "pinned", label: "Pinned", countKey: "pinned" },
+  { id: "watchlist", label: "Watchlist", countKey: "watchlist" },
+  { id: "owned", label: "Owned", countKey: "owned" },
+  { id: "reserved", label: "Reserved", countKey: "reserved" },
+];
 
 export function SavedViewTabs({
   savedViews,
@@ -53,8 +66,26 @@ export function SavedViewTabs({
   onDuplicateActiveView,
   onNewView,
 }: Props) {
-  const customViews = useMemo(() => savedViews.filter((v) => !v.builtIn), [savedViews]);
-  const activeCustomView = customViews.find((v) => v.id === activeViewId) ?? null;
+  const [orderNonce, setOrderNonce] = useState(0);
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  const mergedOrder = useMemo(() => {
+    const loaded = typeof window !== "undefined" ? loadSavedViewOrder() : [];
+    const ids = new Set(savedViews.map((v) => v.id));
+    const base = loaded.filter((id) => ids.has(id));
+    for (const v of savedViews) {
+      if (!base.includes(v.id)) base.push(v.id);
+    }
+    void orderNonce;
+    return base;
+  }, [savedViews, orderNonce]);
+
+  const orderedViews = useMemo(() => orderSavedViews(savedViews, mergedOrder), [savedViews, mergedOrder]);
+
+  const activeCustomView = useMemo(
+    () => (activeViewId ? orderedViews.find((v) => v.id === activeViewId) ?? null : null),
+    [orderedViews, activeViewId],
+  );
 
   const showingStatusTab = activeCustomView == null;
   const dirty = useMemo(() => {
@@ -63,91 +94,91 @@ export function SavedViewTabs({
     return queryString !== snapshotQuery;
   }, [showingStatusTab, activeViewId, queryString, snapshotQuery]);
 
-  const systemTabs: { id: RowStatusTab; label: string; count?: number }[] = [
-    { id: "all", label: "All", count: statusCounts?.all },
-    { id: "owned", label: "Owned", count: statusCounts?.owned },
-    { id: "wishlist", label: "Wishlist", count: statusCounts?.wishlist },
-    { id: "pinned", label: "Pinned", count: statusCounts?.pinned },
-    { id: "none", label: "None", count: statusCounts?.none },
-  ];
+  const reorder = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const ix = [...mergedOrder];
+    const ai = ix.indexOf(fromId);
+    const bi = ix.indexOf(toId);
+    if (ai < 0 || bi < 0) return;
+    ix.splice(ai, 1);
+    ix.splice(bi, 0, fromId);
+    persistSavedViewOrder(ix);
+    startTransition(() => setOrderNonce((n) => n + 1));
+  }, [mergedOrder]);
 
   return (
     <div className="flex min-h-9 w-full min-w-0 items-center gap-1">
       <div
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain pb-0.5 [scrollbar-width:thin]"
         role="tablist"
-        aria-label="Status and saved views"
+        aria-label="Scope and saved views"
       >
-        {systemTabs.map((tab) => {
+        {LOCKED_TABS.map((tab) => {
           const selected = showingStatusTab && activeStatusTab === tab.id;
+          const count = statusCounts?.[tab.countKey];
           return (
-            <div
-              key={`sys-${tab.id}`}
+            <button
+              key={`locked-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={selected}
               className={cn(
-                "flex shrink-0 items-stretch rounded-md border border-transparent",
-                selected && "border-border bg-background shadow-sm",
+                "max-w-[10rem] shrink-0 truncate rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
+                selected ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
               )}
+              onClick={() => onSelectStatusTab(tab.id)}
+              title={tab.label}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                className={cn(
-                  "max-w-[10rem] truncate rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
-                  selected ? "text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                )}
-                onClick={() => onSelectStatusTab(tab.id)}
-                title={tab.label}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="truncate">{tab.label}</span>
-                  {tab.count != null ? (
-                    <span className="tabular-nums text-muted-foreground">({tab.count.toLocaleString()})</span>
-                  ) : null}
-                </span>
-              </button>
-              {selected ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    type="button"
-                    className={cn(
-                      buttonVariants({ variant: "ghost", size: "icon" }),
-                      "h-full min-h-8 w-8 shrink-0 rounded-l-none rounded-r-md px-0 text-muted-foreground",
-                    )}
-                    aria-label={`${tab.label} options`}
-                  >
-                    <ChevronDown className="size-3.5 opacity-80" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    <DropdownMenuItem onClick={onSaveAsCopy}>Save as copy…</DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem disabled className="text-[11px] text-muted-foreground">
-                      Built-in tab (not renameable)
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
-            </div>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="truncate">{tab.label}</span>
+                {count != null ? (
+                  <span className="tabular-nums text-muted-foreground">({count.toLocaleString()})</span>
+                ) : null}
+              </span>
+            </button>
           );
         })}
 
-        {customViews.map((v) => {
+        {orderedViews.map((v) => {
           const selected = activeCustomView?.id === v.id;
           const tabDirty = selected && dirty;
           return (
             <div
               key={v.id}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (dragId && dragId !== v.id) e.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragId) reorder(dragId, v.id);
+                setDragId(null);
+              }}
               className={cn(
-                "flex shrink-0 items-stretch rounded-md border border-transparent",
-                selected && "border-border bg-background shadow-sm",
+                "flex shrink-0 items-stretch rounded-md",
+                dragId === v.id && "opacity-60",
+                selected && "bg-background shadow-sm",
               )}
             >
+              <span
+                draggable
+                onDragStart={(e) => {
+                  setDragId(v.id);
+                  e.dataTransfer.setData("text/plain", v.id);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragEnd={() => setDragId(null)}
+                className="flex cursor-grab items-center px-0.5 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                title="Drag to reorder"
+              >
+                <GripVertical className="size-3.5" aria-hidden />
+              </span>
               <button
                 type="button"
                 role="tab"
                 aria-selected={selected}
                 className={cn(
-                  "max-w-[10rem] truncate rounded-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
+                  "max-w-[10rem] truncate rounded-md px-2 py-1.5 text-left text-xs font-medium transition-colors",
                   selected ? "text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                 )}
                 onClick={() => onSelectView(v)}
@@ -188,7 +219,9 @@ export function SavedViewTabs({
                     >
                       Rename…
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={onSaveAsCopy}>Save as copy…</DropdownMenuItem>
                     <DropdownMenuItem onClick={onDuplicateActiveView}>Duplicate</DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem
                       variant="destructive"
                       onClick={() => {
@@ -203,18 +236,19 @@ export function SavedViewTabs({
             </div>
           );
         })}
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0"
+          title="New saved view"
+          aria-label="New saved view"
+          onClick={onNewView}
+        >
+          <Plus className="size-4" />
+        </Button>
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="size-8 shrink-0 rounded-md"
-        title="New saved view"
-        aria-label="New saved view"
-        onClick={onNewView}
-      >
-        <Plus className="size-4" />
-      </Button>
     </div>
   );
 }

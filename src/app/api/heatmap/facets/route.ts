@@ -38,8 +38,8 @@ function withFacetCleared(
 
 type FacetsResponse = {
   total: number;
-  /** Row-scope-independent counts for status tabs (same base as `rowScope` facet clears). */
-  status: { all: number; owned: number; wishlist: number; none: number };
+  /** Row-scope-independent counts for scope tabs (same base as `rowScope` facet clears). */
+  status: { all: number; owned: number; watchlist: number; none: number };
   rarity: { key: string; n: number }[];
   colorIdentity: { key: string; n: number }[];
   rowScope: { owned: number; watchlist: number; pinned: number; reserved: number };
@@ -298,7 +298,7 @@ export async function GET(req: NextRequest) {
       status: {
         all: allStatusRow.n ?? 0,
         owned: ownedRow.n ?? 0,
-        wishlist: watchRow.n ?? 0,
+        watchlist: watchRow.n ?? 0,
         none: noneStatusRow.n ?? 0,
       },
       rarity: rarityRows.map((r) => ({ key: r.k, n: r.n })),

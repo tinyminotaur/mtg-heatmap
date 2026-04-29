@@ -10,9 +10,9 @@ type Props = {
   counts?: {
     all: number;
     owned: number;
-    wishlist: number;
+    watchlist: number;
     pinned: number;
-    none: number;
+    reserved: number;
   };
   loading?: boolean;
   /** Segmented control with inset selection (filter rail). */
@@ -21,10 +21,10 @@ type Props = {
 
 const TABS: { id: RowStatusTab; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "owned", label: "Owned" },
-  { id: "wishlist", label: "Wishlist" },
   { id: "pinned", label: "Pinned" },
-  { id: "none", label: "None" },
+  { id: "watchlist", label: "Watchlist" },
+  { id: "owned", label: "Owned" },
+  { id: "reserved", label: "Reserved" },
 ];
 
 export function StatusTabs({ filters, onTabChange, counts, loading, variant = "default" }: Props) {
@@ -41,7 +41,7 @@ export function StatusTabs({ filters, onTabChange, counts, loading, variant = "d
           : "rounded-md border border-border bg-muted/25 p-0.5",
       )}
       role="tablist"
-      aria-label="Collection status"
+      aria-label="Collection scope"
     >
       {TABS.map(({ id, label }) => {
         const active = cur === id;
@@ -50,11 +50,11 @@ export function StatusTabs({ filters, onTabChange, counts, loading, variant = "d
             ? counts?.all
             : id === "owned"
               ? counts?.owned
-              : id === "wishlist"
-                ? counts?.wishlist
+              : id === "watchlist"
+                ? counts?.watchlist
                 : id === "pinned"
                   ? counts?.pinned
-                : counts?.none;
+                  : counts?.reserved;
         return (
           <button
             key={id}

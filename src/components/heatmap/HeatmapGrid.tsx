@@ -113,7 +113,7 @@ function drawPriceRangeBadge(
   ctx.font = "bold 8px system-ui, sans-serif";
   const tw = ctx.measureText(label).width;
   const pw = Math.ceil(tw + padX * 2);
-  const bx = vx + 2;
+  const bx = vx + HEATMAP_COL_WIDTH - pw - 2;
   const by = vy + 2 + stackIndex * (ph + 3);
   const style =
     variant === "low"
@@ -139,6 +139,41 @@ function drawPriceRangeBadge(
   ctx.restore();
 }
 
+/** Pinned (row) top-left, watchlist middle-left, owned bottom-left — matches scope tab terminology. */
+function drawCellScopeGlyphs(
+  ctx: CanvasRenderingContext2D,
+  vx: number,
+  vy: number,
+  row: RowDTO,
+  cell: CellDTO,
+  dark: boolean,
+) {
+  const pin = "\u{1F4CC}";
+  const star = "\u2605";
+  const lib = "\u{1F4DA}";
+  ctx.save();
+  ctx.textAlign = "left";
+  if (row.pinned) {
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillStyle = dark ? "#e9d5ff" : "#7e22ce";
+    ctx.textBaseline = "top";
+    ctx.fillText(pin, vx + 3, vy + 3);
+  }
+  if (cell.watchlisted) {
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillStyle = dark ? "#93c5fd" : "#1d4ed8";
+    ctx.textBaseline = "middle";
+    ctx.fillText(star, vx + 4, vy + HEATMAP_ROW_HEIGHT / 2);
+  }
+  if (cell.owned_qty > 0) {
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillStyle = dark ? "#fcd34d" : "#b45309";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(lib, vx + 3, vy + HEATMAP_ROW_HEIGHT - 3);
+  }
+  ctx.restore();
+}
+
 function drawCellPriceLabel(
   ctx: CanvasRenderingContext2D,
   vx: number,
@@ -147,7 +182,7 @@ function drawCellPriceLabel(
   dark: boolean,
   emphasis: boolean,
 ) {
-  /** Bottom-right; Min/Max badges use top-left. */
+  /** Bottom-right; Min/Max badges use top-right. */
   const pad = 3;
   const maxW = HEATMAP_COL_WIDTH - pad * 2;
   const rightX = vx + HEATMAP_COL_WIDTH - pad;
@@ -367,30 +402,19 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
             ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.22)" : "rgba(147, 51, 234, 0.16)";
             ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
           }
-          if (cell.owned_qty > 0) {
-            ctx.strokeStyle = dark ? "#eab308" : "#ca8a04";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 2, HEATMAP_ROW_HEIGHT - 2);
-          }
-          if (cell.watchlisted) {
-            ctx.strokeStyle = "#3b82f6";
-            ctx.lineWidth = cell.owned_qty > 0 ? 1.5 : 2;
-            ctx.setLineDash(cell.owned_qty > 0 ? [3, 2] : []);
-            ctx.strokeRect(vx + 1.5, vy + 1.5, HEATMAP_COL_WIDTH - 4, HEATMAP_ROW_HEIGHT - 4);
-            ctx.setLineDash([]);
-          }
         }
         if (contextDim) {
           ctx.fillStyle = dark ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.5)";
           ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
         }
         if (cell && !strictHide) {
-          const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
-          drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null);
+          drawCellScopeGlyphs(ctx, vx, vy, row, cell, dark);
           const badges: { label: string; variant: "low" | "high" }[] = [];
           if (row.price_low_cols.includes(c)) badges.push({ label: "Min", variant: "low" });
           if (row.price_high_cols.includes(c)) badges.push({ label: "Max", variant: "high" });
           badges.forEach((b, i) => drawPriceRangeBadge(ctx, vx, vy, b.label, b.variant, dark, i));
+          const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
+          drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null);
         }
       }
     }

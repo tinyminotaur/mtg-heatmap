@@ -80,14 +80,19 @@ export function buildActiveFilterChips(f: HeatmapFilters): ActiveFilterChip[] {
 
   const st = rowStatusFromFilters(f);
   if (st !== "all") {
+    const label =
+      st === "owned"
+        ? "Scope: Owned"
+        : st === "watchlist"
+          ? "Scope: Watchlist"
+          : st === "pinned"
+            ? "Scope: Pinned"
+            : st === "reserved"
+              ? "Scope: Reserved"
+              : "Scope";
     out.push({
       id: "status",
-      label:
-        st === "owned"
-          ? "Status: Owned"
-          : st === "wishlist"
-            ? "Status: Wishlist"
-            : "Status: Not owned",
+      label,
       kind: "status",
     });
   }
@@ -134,14 +139,6 @@ export function buildActiveFilterChips(f: HeatmapFilters): ActiveFilterChip[] {
     });
   }
 
-  if (f.reservedOnly === true) {
-    out.push({ id: "reserved", label: "Reserved List", kind: "reserved" });
-  }
-
-  if (f.pinned === true) {
-    out.push({ id: "pinned", label: "Pinned rows only", kind: "pinned" });
-  }
-
   if (f.includeDigital) {
     out.push({ id: "digital", label: "Digital sets", kind: "digital" });
   }
@@ -173,7 +170,7 @@ export function clearChip(
     case "hideSets":
       return { ...f, hiddenSets: [] };
     case "status":
-      return { ...f, owned: null, watchlist: null };
+      return { ...f, owned: null, watchlist: null, pinned: null, reservedOnly: null };
     case "price":
       return { ...f, priceMin: null, priceMax: null };
     case "year":

@@ -34,7 +34,7 @@ import { HeatmapRowSortMenu, type RowSortAnchorRect } from "./HeatmapRowSortMenu
 import { HeatmapGuideDialog } from "./HeatmapGuideDialog";
 import { OwnedListPanel } from "@/components/owned/OwnedListPanel";
 import { WatchlistListPanel } from "@/components/watchlist/WatchlistListPanel";
-import { Bookmark, Library, Maximize2, Palette, Search, X } from "lucide-react";
+import { Library, Maximize2, Palette, Search, Star, X } from "lucide-react";
 import type { SortingState, VisibilityState } from "@tanstack/react-table";
 
 /** Toggle `qr=` / `qc=` comma lists in the URL (session quick-pins). */
@@ -389,7 +389,7 @@ export function HeatmapView() {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [ownedOverlayOpen, setOwnedOverlayOpen] = useState(false);
-  const [wishlistOverlayOpen, setWishlistOverlayOpen] = useState(false);
+  const [watchlistOverlayOpen, setWatchlistOverlayOpen] = useState(false);
   const [modK] = useState(() => (/mac|iphone|ipad|ipod/i.test(navigator.userAgent) ? "⌘K" : "Ctrl+K"));
   const goPending = useRef(false);
   const goTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -721,7 +721,7 @@ export function HeatmapView() {
           setOwnedOverlayOpen(true);
         } else if (k === "w") {
           persistSessionNav();
-          setWishlistOverlayOpen(true);
+          setWatchlistOverlayOpen(true);
         } else {
           persistSessionNav();
           router.push("/");
@@ -1002,7 +1002,7 @@ export function HeatmapView() {
         onOpenHelp={() => setHelpOpen(true)}
         onApplySearch={(q) => setParam("q", q)}
         onNavigateOwned={() => setOwnedOverlayOpen(true)}
-        onNavigateWishlist={() => setWishlistOverlayOpen(true)}
+        onNavigateWatchlist={() => setWatchlistOverlayOpen(true)}
       />
 
       <HeatmapGuideDialog
@@ -1026,7 +1026,7 @@ export function HeatmapView() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={wishlistOverlayOpen} onOpenChange={setWishlistOverlayOpen}>
+      <Sheet open={watchlistOverlayOpen} onOpenChange={setWatchlistOverlayOpen}>
         <SheetContent
           side="right"
           showCloseButton
@@ -1066,10 +1066,10 @@ export function HeatmapView() {
           <button
             type="button"
             className="header-toolbar-action cursor-pointer"
-            onClick={() => setWishlistOverlayOpen(true)}
+            onClick={() => setWatchlistOverlayOpen(true)}
           >
-            <Bookmark className="size-4 shrink-0 text-amber-200/90" aria-hidden />
-            <span>Wishlist</span>
+            <Star className="size-4 shrink-0 text-amber-200/90" aria-hidden />
+            <span>Watchlist</span>
           </button>
           <button type="button" className="header-toolbar-action cursor-pointer" onClick={() => setGuideOpen(true)}>
             <Palette className="size-4 shrink-0 text-amber-200/90" aria-hidden />
@@ -1105,7 +1105,7 @@ export function HeatmapView() {
         onOpenKeyboardHelp={() => setHelpOpen(true)}
         onPersistNav={persistSessionNav}
         onOpenOwnedPanel={() => setOwnedOverlayOpen(true)}
-        onOpenWishlistPanel={() => setWishlistOverlayOpen(true)}
+        onOpenWatchlistPanel={() => setWatchlistOverlayOpen(true)}
       />
 
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
@@ -1641,7 +1641,7 @@ export function HeatmapView() {
                   size="sm"
                   onClick={() => void toggleWatch()}
                 >
-                  {floatingPreview.cell.watchlisted ? "Watchlisted" : "Watchlist"}
+                  {floatingPreview.cell.watchlisted ? "On watchlist" : "Watchlist"}
                 </Button>
                 <Button
                   type="button"
