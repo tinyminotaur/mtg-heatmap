@@ -73,6 +73,36 @@ const PREVIEW_PANEL_W = 400;
 const PREVIEW_APPROX_H = 480;
 const PREVIEW_EDITION_APPROX_H = 300;
 
+/** Match canvas headers / fallback when SVG fails — code centered in the rounded tile. */
+function EditionHeaderPreviewIcon({ code, iconSvgPath }: { code: string; iconSvgPath: string | null }) {
+  const [broken, setBroken] = useState(false);
+  const url = resolveSetIconSvgUrl(code, iconSvgPath);
+  const weakIcon = !iconSvgPath?.trim() || iconSvgPath.startsWith("/set-icons/");
+  if (weakIcon || broken) {
+    return (
+      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40 shadow-sm ring-1 ring-black/5 dark:bg-zinc-800/90 dark:ring-white/10">
+        <span className="max-w-[3.25rem] select-none text-center font-mono text-[10px] font-bold leading-none tracking-tight text-foreground">
+          {code.slice(0, 3).toUpperCase()}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-white shadow-sm ring-1 ring-black/5 dark:border-zinc-500/70 dark:bg-zinc-100 dark:ring-white/10">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt=""
+        width={56}
+        height={56}
+        className="h-full w-full object-contain p-1.5"
+        decoding="async"
+        onError={() => setBroken(true)}
+      />
+    </div>
+  );
+}
+
 function humanizeSetType(setType: string | null): string {
   if (!setType) return "Magic: The Gathering edition.";
   const map: Record<string, string> = {
@@ -1475,20 +1505,11 @@ export function HeatmapView() {
           <div className="mb-2 border-b border-border pb-2 text-xs font-medium text-muted-foreground">Edition</div>
           <div className="flex gap-3">
             {columns[editionHeaderHover.col]!.set_type !== "aggregate" ? (
-              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-white shadow-sm ring-1 ring-black/5 dark:border-zinc-500/70 dark:bg-zinc-100 dark:ring-white/10">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={resolveSetIconSvgUrl(
-                    columns[editionHeaderHover.col]!.code,
-                    columns[editionHeaderHover.col]!.icon_svg_path,
-                  )}
-                  alt=""
-                  width={56}
-                  height={56}
-                  className="h-full w-full object-contain p-1.5"
-                  decoding="async"
-                />
-              </div>
+              <EditionHeaderPreviewIcon
+                key={columns[editionHeaderHover.col]!.code}
+                code={columns[editionHeaderHover.col]!.code}
+                iconSvgPath={columns[editionHeaderHover.col]!.icon_svg_path ?? null}
+              />
             ) : (
               <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-[10px] font-semibold leading-tight text-muted-foreground">
                 Σ

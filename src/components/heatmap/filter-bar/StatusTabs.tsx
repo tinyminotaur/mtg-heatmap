@@ -14,6 +14,8 @@ type Props = {
     none: number;
   };
   loading?: boolean;
+  /** Segmented control with inset selection (filter rail). */
+  variant?: "default" | "rail";
 };
 
 const TABS: { id: RowStatusTab; label: string }[] = [
@@ -23,12 +25,19 @@ const TABS: { id: RowStatusTab; label: string }[] = [
   { id: "none", label: "None" },
 ];
 
-export function StatusTabs({ filters, onTabChange, counts, loading }: Props) {
+export function StatusTabs({ filters, onTabChange, counts, loading, variant = "default" }: Props) {
   const cur = rowStatusFromFilters(filters);
+
+  const rail = variant === "rail";
 
   return (
     <div
-      className="flex flex-wrap items-center gap-1 rounded-md border border-border bg-muted/25 p-0.5"
+      className={cn(
+        "flex flex-wrap items-center gap-0.5",
+        rail
+          ? "w-full rounded-lg border border-border bg-muted/40 p-1 dark:bg-muted/25"
+          : "rounded-md border border-border bg-muted/25 p-0.5",
+      )}
       role="tablist"
       aria-label="Collection status"
     >
@@ -49,10 +58,14 @@ export function StatusTabs({ filters, onTabChange, counts, loading }: Props) {
             role="tab"
             aria-selected={active}
             className={cn(
-              "rounded px-2 py-1.5 text-[11px] font-medium transition-colors",
-              active
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+              "rounded-md px-3 py-2 text-[11px] font-medium transition-colors",
+              rail
+                ? active
+                  ? "bg-background text-foreground shadow-sm dark:bg-zinc-950 dark:text-zinc-50"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                : active
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
             )}
             onClick={() => onTabChange(id)}
           >
@@ -60,7 +73,14 @@ export function StatusTabs({ filters, onTabChange, counts, loading }: Props) {
             {loading ? (
               <span className="ml-1 inline-block h-3 w-8 animate-pulse rounded bg-muted align-middle" />
             ) : n != null ? (
-              <span className="ml-1 tabular-nums text-muted-foreground">({n.toLocaleString()})</span>
+              <span
+                className={cn(
+                  "ml-1 tabular-nums",
+                  rail && active ? "text-muted-foreground" : "text-muted-foreground",
+                )}
+              >
+                ({n.toLocaleString()})
+              </span>
             ) : null}
           </button>
         );

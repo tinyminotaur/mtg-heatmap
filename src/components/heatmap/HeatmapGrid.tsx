@@ -492,12 +492,6 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillText(c.code.slice(0, 3).toUpperCase(), vx + HEATMAP_COL_WIDTH / 2, iy + isz / 2);
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
-        ctx.fillStyle = fg;
-        ctx.font = "bold 11px ui-monospace, SFMono-Regular, Menlo, monospace";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "alphabetic";
-        ctx.fillText(c.code.toUpperCase(), vx + HEATMAP_COL_WIDTH / 2, iy + isz + 14);
-        ctx.textAlign = "left";
       }
       ctx.fillStyle = muted;
       ctx.font = "10px ui-monospace, system-ui, sans-serif";

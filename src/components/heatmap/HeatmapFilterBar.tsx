@@ -55,8 +55,8 @@ import { PriceFilter } from "@/components/heatmap/filter-bar/PriceFilter";
 import { RarityFilter } from "@/components/heatmap/filter-bar/RarityFilter";
 import { SaveViewDialog } from "@/components/heatmap/filter-bar/SaveViewDialog";
 import { SetsPicker } from "@/components/heatmap/filter-bar/SetsPicker";
+import { SavedViewTabs } from "@/components/heatmap/filter-bar/SavedViewTabs";
 import { StatusTabs } from "@/components/heatmap/filter-bar/StatusTabs";
-import { ViewsSelector } from "@/components/heatmap/filter-bar/ViewsSelector";
 
 export type ViewSessionMeta = { activeViewId: string | null; snapshotQuery: string | null };
 
@@ -142,7 +142,6 @@ export function HeatmapFilterBar({
     staleTime: 30_000,
   });
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
-  const [newName, setNewName] = useState("");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   useEffect(() => {
@@ -157,11 +156,6 @@ export function HeatmapFilterBar({
     if (activeViewId && snapshotQuery != null && queryString !== snapshotQuery) return;
     startTransition(() => onViewSessionChange({ activeViewId: hit.id, snapshotQuery: hit.query }));
   }, [queryString, savedViews, activeViewId, snapshotQuery, onViewSessionChange]);
-
-  const dirty = useMemo(() => {
-    if (!activeViewId || snapshotQuery == null) return false;
-    return queryString !== snapshotQuery;
-  }, [activeViewId, queryString, snapshotQuery]);
 
   const selectView = useCallback(
     (v: SavedView) => {
@@ -178,19 +172,6 @@ export function HeatmapFilterBar({
     persistSavedViews(next);
     onViewSessionChange({ activeViewId, snapshotQuery: queryString });
   }, [activeViewId, queryString, savedViews, onViewSessionChange]);
-
-  const createView = useCallback(() => {
-    const name = newName.trim() || `View ${savedViews.length + 1}`;
-    const v: SavedView = {
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      name,
-      query: queryString,
-    };
-    const next = upsertSavedView(savedViews, v);
-    setSavedViews(next);
-    onViewSessionChange({ activeViewId: v.id, snapshotQuery: queryString });
-    setNewName("");
-  }, [newName, queryString, savedViews, onViewSessionChange]);
 
   const setSortSlots = (slots: SortSlot[]) => {
     const next = slots.slice(0, 3);
@@ -291,6 +272,17 @@ export function HeatmapFilterBar({
     });
   }, []);
 
+  const duplicateActiveView = useCallback(() => {
+    if (!activeViewId) return;
+    const next = duplicateSavedView(savedViews, activeViewId);
+    const created = next.find((v) => !savedViews.some((o) => o.id === v.id));
+    setSavedViews(next);
+    if (created) {
+      onViewSessionChange({ activeViewId: created.id, snapshotQuery: created.query });
+      onReplaceQuery(new URLSearchParams(created.query));
+    }
+  }, [activeViewId, savedViews, onReplaceQuery, onViewSessionChange]);
+
   const toggleRarity = (r: string) => {
     patch((b) => {
       const s = new Set(b.rarity);
@@ -325,25 +317,43 @@ export function HeatmapFilterBar({
 
   return (
     <div
-      className="flex min-h-0 shrink-0 flex-col rounded-lg border border-border bg-muted/20 text-sm"
+      className="flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-muted/20 text-sm"
       suppressHydrationWarning
     >
+      {/* Row status — segmented rail attached to the filter card */}
+      <div className="shrink-0 border-b border-border bg-muted/25 px-2 py-2 sm:px-3 md:py-2.5">
+        <StatusTabs
+          variant="rail"
+          filters={f}
+          onTabChange={(tab) => patch((b) => applyRowStatus(b, tab))}
+          counts={facets?.status}
+          loading={facetsLoading}
+        />
+      </div>
+
+      {/* Saved views — browser-style tabs + new view */}
+      <div className="shrink-0 border-b border-border bg-muted/15 px-2 py-1.5 sm:px-3">
+        <SavedViewTabs
+          savedViews={savedViews}
+          activeViewId={activeViewId}
+          queryString={queryString}
+          snapshotQuery={snapshotQuery}
+          onSelectView={selectView}
+          onDeleteView={(id) => {
+            const next = deleteSavedView(savedViews, id);
+            setSavedViews(next);
+            onViewSessionChange({ activeViewId: null, snapshotQuery: null });
+          }}
+          onRenameView={renameView}
+          onSaveActiveView={saveActiveView}
+          onDuplicateActiveView={duplicateActiveView}
+          onNewView={() => setSaveDialogOpen(true)}
+        />
+      </div>
+
       {/* Filter bar: sticky on md+, mobile sheet for full controls */}
-      <div className="sticky top-0 z-40 rounded-lg border border-border bg-muted/25 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-muted/15">
+      <div className="sticky top-0 z-40 border-b border-border bg-muted/25 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-muted/15">
         <div className="hidden flex-wrap items-center gap-x-2 gap-y-2 px-2 py-2 md:flex md:px-3">
-          <ViewsSelector
-            savedViews={savedViews}
-            activeViewId={activeViewId}
-            queryString={queryString}
-            onSelectView={selectView}
-            onDeleteView={(id) => {
-              const next = deleteSavedView(savedViews, id);
-              setSavedViews(next);
-              onViewSessionChange({ activeViewId: null, snapshotQuery: null });
-            }}
-            onRenameView={renameView}
-            onSaveCurrentView={() => setSaveDialogOpen(true)}
-          />
           <FilterSearch
             value={f.search}
             onChange={(v) => patch((b) => ({ ...b, search: v }))}
@@ -368,12 +378,6 @@ export function HeatmapFilterBar({
             onSelectedSetsChange={(sets) => patch((b) => ({ ...b, sets }))}
             includeDigital={f.includeDigital}
             onPresetReservedRows={() => patch((b) => ({ ...b, reservedOnly: true }))}
-          />
-          <StatusTabs
-            filters={f}
-            onTabChange={(tab) => patch((b) => applyRowStatus(b, tab))}
-            counts={facets?.status}
-            loading={facetsLoading}
           />
           <PriceFilter
             priceMin={f.priceMin}
@@ -433,31 +437,6 @@ export function HeatmapFilterBar({
               <MoreHorizontal className="size-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              {activeViewId ? (
-                <>
-                  <DropdownMenuItem disabled={!dirty} onClick={saveActiveView}>
-                    Save view
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              ) : null}
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                  New saved view
-                </DropdownMenuLabel>
-                <div className="flex gap-2 px-2 pb-2">
-                  <Input
-                    placeholder="Name"
-                    className="h-8 text-xs"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                  />
-                  <Button type="button" size="sm" className="h-8 shrink-0 text-xs" onClick={createView}>
-                    Save as…
-                  </Button>
-                </div>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
                   onPersistNav?.();
@@ -479,30 +458,6 @@ export function HeatmapFilterBar({
               <DropdownMenuItem onClick={onOpenCommandPalette}>Command palette (⌘K)</DropdownMenuItem>
               <DropdownMenuItem onClick={onOpenKeyboardHelp}>Keyboard shortcuts (?)</DropdownMenuItem>
               <DropdownMenuSeparator />
-              {activeViewId ? (
-                <>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      if (!activeViewId) return;
-                      setSavedViews(duplicateSavedView(savedViews, activeViewId));
-                    }}
-                  >
-                    Duplicate view
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => {
-                      if (!activeViewId) return;
-                      const next = deleteSavedView(savedViews, activeViewId);
-                      setSavedViews(next);
-                      onViewSessionChange({ activeViewId: null, snapshotQuery: null });
-                    }}
-                  >
-                    Delete view
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              ) : null}
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="text-xs">Display</DropdownMenuLabel>
                 <div className="space-y-2 px-2 pb-2">
@@ -595,7 +550,6 @@ export function HeatmapFilterBar({
           chips={activeChips}
           onRemove={(id) => patch((b) => clearChip(b, id))}
           onClearAll={onClearFilterState}
-          onSaveView={() => setSaveDialogOpen(true)}
         />
       </div>
 
@@ -629,6 +583,7 @@ export function HeatmapFilterBar({
             <section className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">Status</p>
               <StatusTabs
+                variant="rail"
                 filters={f}
                 onTabChange={(tab) => patch((b) => applyRowStatus(b, tab))}
                 counts={facets?.status}
