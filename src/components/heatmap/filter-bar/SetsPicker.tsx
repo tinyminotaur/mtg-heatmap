@@ -254,19 +254,24 @@ export function SetsPicker({
                     >
                       {tag}
                     </span>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={iconUrl}
-                      alt=""
-                      width={16}
-                      height={16}
-                      className="size-4 shrink-0 object-contain"
-                      loading="lazy"
-                      decoding="async"
-                      onError={(e) => {
-                        e.currentTarget.style.visibility = "hidden";
-                      }}
-                    />
+                    <span
+                      className="inline-flex size-[22px] shrink-0 items-center justify-center rounded-md border border-zinc-300/90 bg-white shadow-sm dark:border-zinc-400/80 dark:bg-zinc-100 dark:shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+                      aria-hidden
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={iconUrl}
+                        alt=""
+                        width={16}
+                        height={16}
+                        className="size-4 object-contain"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          e.currentTarget.style.visibility = "hidden";
+                        }}
+                      />
+                    </span>
                     <span className="w-9 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">
                       {y}
                     </span>
