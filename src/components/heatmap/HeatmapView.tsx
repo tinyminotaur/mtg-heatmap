@@ -1070,56 +1070,49 @@ export function HeatmapView() {
             MTG Value Map
           </h1>
         </div>
-        <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-end">
-          {portfolioSummary ? (
-            <div
-              className="order-2 w-full text-right text-[11px] leading-snug text-muted-foreground sm:order-1 sm:w-auto sm:max-w-[28rem]"
-              title="Portfolio-wide totals (not limited to the current heatmap filters)"
-            >
-              <div className="font-mono text-foreground">
-                <span className="text-amber-100/95">
-                  ${portfolioSummary.total_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-                <span className="mx-1 text-muted-foreground">·</span>
-                <span>{portfolioSummary.unique_oracles} owned</span>
-                <span className="mx-1 text-muted-foreground">·</span>
-                <span>{portfolioSummary.copies} copies</span>
-              </div>
-              <div>
-                <span>{portfolioSummary.watchlist_entries} watchlist</span>
-                <span className="mx-1">·</span>
-                <span className="tabular-nums">
-                  ${portfolioSummary.watchlist_total_usd.toLocaleString(undefined, { maximumFractionDigits: 0 })} WL
-                </span>
-                <span className="mx-1">·</span>
-                <span>{portfolioSummary.pinned_oracles} pinned</span>
-              </div>
-            </div>
-          ) : (
-            <div
-              className="order-2 hidden h-10 w-full max-w-xs animate-pulse rounded-md bg-muted/30 sm:order-1 sm:block"
-              aria-hidden
-            />
-          )}
+        <div className="flex min-w-0 flex-1 flex-wrap items-start justify-end gap-2">
           <nav
-            className="order-1 flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:order-2 sm:gap-2"
+            className="flex max-w-full flex-wrap items-center justify-end gap-1.5 sm:gap-2"
             aria-label="Shortcuts and pages"
           >
           <button
             type="button"
-            className="header-toolbar-action cursor-pointer"
+            className="header-toolbar-action cursor-pointer inline-flex min-w-[10.5rem] items-start gap-2 py-2 text-left"
             onClick={() => setOwnedOverlayOpen(true)}
+            title="Open owned collection — values are condition-adjusted (NM=1.0, LP=0.85, …)"
           >
-            <Library className="size-4 shrink-0 text-amber-200/90" aria-hidden />
-            <span>Owned</span>
+            <Library className="size-4 shrink-0 text-amber-200/90 mt-0.5" aria-hidden />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="font-medium leading-none">Owned</span>
+              {portfolioSummary ? (
+                <span className="font-mono text-[10px] leading-tight text-amber-100/90 tabular-nums">
+                  ${portfolioSummary.total_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                  · {portfolioSummary.unique_oracles} cards · {portfolioSummary.copies} copies
+                </span>
+              ) : (
+                <span className="h-3 w-28 max-w-full animate-pulse rounded bg-muted/40" aria-hidden />
+              )}
+            </span>
           </button>
           <button
             type="button"
-            className="header-toolbar-action cursor-pointer"
+            className="header-toolbar-action cursor-pointer inline-flex min-w-[9.5rem] items-start gap-2 py-2 text-left"
             onClick={() => setWatchlistOverlayOpen(true)}
+            title="Open watchlist — total uses current prices per printing"
           >
-            <Star className="size-4 shrink-0 text-amber-200/90" aria-hidden />
-            <span>Watchlist</span>
+            <Star className="size-4 shrink-0 text-amber-200/90 mt-0.5" aria-hidden />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="font-medium leading-none">Watchlist</span>
+              {portfolioSummary ? (
+                <span className="font-mono text-[10px] leading-tight text-amber-100/90 tabular-nums">
+                  ${portfolioSummary.watchlist_total_usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+                  · {portfolioSummary.watchlist_entries}{" "}
+                  {portfolioSummary.watchlist_entries === 1 ? "item" : "items"}
+                </span>
+              ) : (
+                <span className="h-3 w-24 max-w-full animate-pulse rounded bg-muted/40" aria-hidden />
+              )}
+            </span>
           </button>
           <button type="button" className="header-toolbar-action cursor-pointer" onClick={() => setGuideOpen(true)}>
             <Palette className="size-4 shrink-0 text-amber-200/90" aria-hidden />
@@ -1135,7 +1128,7 @@ export function HeatmapView() {
             </span>
           </button>
         </nav>
-        </div>
+      </div>
       </header>
 
       <HeatmapFilterBar
