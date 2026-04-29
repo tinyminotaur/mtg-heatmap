@@ -9,11 +9,17 @@ export type AuthUser = {
 let schemaEnsured = false;
 
 export function userDbEnabled(): boolean {
-  return Boolean((process.env.POSTGRES_URL ?? "").trim());
+  const pg = (process.env.POSTGRES_URL ?? "").trim();
+  const neon = (process.env.DATABASE_URL ?? "").trim();
+  return Boolean(pg || neon);
 }
 
 export async function ensureUserDbSchema(): Promise<void> {
   if (!userDbEnabled()) return;
+  // Neon/Vercel integrations commonly provide DATABASE_URL; @vercel/postgres expects POSTGRES_URL.
+  if (!(process.env.POSTGRES_URL ?? "").trim() && (process.env.DATABASE_URL ?? "").trim()) {
+    process.env.POSTGRES_URL = process.env.DATABASE_URL;
+  }
   if (schemaEnsured) return;
   // Minimal durable user data store (separate from SQLite catalog DB).
   await sql`CREATE TABLE IF NOT EXISTS auth_users (
