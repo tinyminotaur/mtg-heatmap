@@ -17,9 +17,8 @@ export const HEATMAP_CANVAS_FONT = {
   rangeBadge: 11,
   rangeBadgeHeight: 15,
   rangeBadgePadX: 6,
-  /** Watchlist / owned markers (left of cell) */
+  /** Watchlist star (top-left) & owned book (bottom-left) */
   scopeGlyph: 11,
-  scopeGlyphStep: 12,
   /** Edition header year & fallback set code */
   headerYear: 12,
   headerSetFallback: 11,

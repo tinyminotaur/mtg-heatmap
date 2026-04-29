@@ -143,6 +143,7 @@ function drawPriceRangeBadge(
 /**
  * Printing-level glyphs only (watchlist · owned). Row pin is oracle-level — shown on the name column,
  * not repeated on every edition cell (avoids looking like each printing was pinned).
+ * Watchlist star: top-left; owned book: bottom-left (clear at a glance, leaves center for price).
  */
 function drawCellScopeGlyphs(
   ctx: CanvasRenderingContext2D,
@@ -153,20 +154,22 @@ function drawCellScopeGlyphs(
 ) {
   const star = "\u2605";
   const lib = "\u{1F4DA}";
-  const glyphs: { ch: string; fill: string }[] = [];
-  if (cell.watchlisted) glyphs.push({ ch: star, fill: dark ? "#93c5fd" : "#1d4ed8" });
-  if (cell.owned_qty > 0) glyphs.push({ ch: lib, fill: dark ? "#fcd34d" : "#b45309" });
-  if (glyphs.length === 0) return;
+  const hasStar = cell.watchlisted;
+  const hasBook = cell.owned_qty > 0;
+  if (!hasStar && !hasBook) return;
   ctx.save();
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "center";
-  const cy = vy + HEATMAP_ROW_HEIGHT / 2;
-  const step = HEATMAP_CANVAS_FONT.scopeGlyphStep;
-  const x0 = vx + 3 + step / 2;
+  const pad = 4;
+  ctx.textAlign = "left";
   ctx.font = `${HEATMAP_CANVAS_FONT.scopeGlyph}px system-ui, sans-serif`;
-  for (let i = 0; i < glyphs.length; i++) {
-    ctx.fillStyle = glyphs[i].fill;
-    ctx.fillText(glyphs[i].ch, x0 + i * step, cy);
+  if (hasStar) {
+    ctx.textBaseline = "top";
+    ctx.fillStyle = dark ? "#93c5fd" : "#1d4ed8";
+    ctx.fillText(star, vx + pad, vy + pad);
+  }
+  if (hasBook) {
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = dark ? "#fcd34d" : "#b45309";
+    ctx.fillText(lib, vx + pad, vy + HEATMAP_ROW_HEIGHT - pad);
   }
   ctx.restore();
 }
@@ -389,6 +392,11 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
             : { usd: null, usd_foil: null, eur: null, tix: null };
         ctx.fillStyle = priceToColor(dto, priceMode, dark);
         ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
+        /** Favorites pin — same subtle band across every cell in the row (incl. empty / strict-hidden). */
+        if (row.pinned) {
+          ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.10)" : "rgba(147, 51, 234, 0.085)";
+          ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
+        }
         if (cell && !strictHide) {
           if (row.quick_pin_row) {
             ctx.fillStyle = dark ? "rgba(245, 158, 11, 0.26)" : "rgba(251, 191, 36, 0.22)";
@@ -410,11 +418,8 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           if (row.price_high_cols.includes(c)) badges.push({ label: "Max", variant: "high" });
           badges.forEach((b, i) => drawPriceRangeBadge(ctx, vx, vy, b.label, b.variant, dark, i));
           const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
-          const glyphN =
-            (cell.watchlisted ? 1 : 0) + (cell.owned_qty > 0 ? 1 : 0);
-          /** Reserve horizontal space for scope glyphs (see `drawCellScopeGlyphs` step & font size). */
-          const leftGlyphReserve =
-            glyphN === 0 ? 0 : glyphN === 1 ? 20 : 34;
+          /** Bottom-left book only intrudes on price width; star is top-left. */
+          const leftGlyphReserve = cell.owned_qty > 0 ? 18 : 0;
           drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null, leftGlyphReserve);
         }
       }
@@ -562,7 +567,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       if (row.pinned) {
-        ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.3)" : "rgba(147, 51, 234, 0.22)";
+        ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.10)" : "rgba(147, 51, 234, 0.085)";
         ctx.fillRect(0, vy, effFrozenColW + effRollupW, HEATMAP_ROW_HEIGHT);
       }
       if (row.watchlisted) {
