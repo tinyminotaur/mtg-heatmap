@@ -35,24 +35,51 @@ export function requirePrintingInHeatmapColumnsSql(
   };
 }
 
+const WUBRG = new Set(["W", "U", "B", "R", "G"]);
+
 export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unknown[] } {
   const parts: string[] = ["1=1"];
   const params: unknown[] = [];
   if (f.reservedOnly === true) {
     parts.push("c.is_reserved = 1");
   }
-  if (f.search.trim().length >= 2) {
-    parts.push("c.name LIKE ?");
-    params.push(`%${f.search.trim()}%`);
+  const q = f.search.trim();
+  if (q.length >= 2) {
+    const term = `%${q}%`;
+    parts.push(
+      "(c.name LIKE ? OR COALESCE(c.type_line, '') LIKE ? OR COALESCE(c.oracle_text, '') LIKE ?)",
+    );
+    params.push(term, term, term);
   }
   if (f.colors.length) {
-    for (const col of f.colors) {
-      if (col === "C") {
-        // “Colorless”: no color identity entries (treat null/empty as colorless).
-        parts.push(`(c.color_identity IS NULL OR c.color_identity = '[]' OR TRIM(c.color_identity) = '')`);
-      } else {
-        parts.push(`instr(COALESCE(c.color_identity, c.colors, ''), ?) > 0`);
+    const mode = f.colorMode ?? "any";
+    const wubrgSel = f.colors.filter((c): c is string => WUBRG.has(c));
+    const wantColorless = f.colors.includes("C");
+    if (mode === "exact") {
+      if (wubrgSel.length === 0 && wantColorless) {
+        parts.push(
+          "(c.color_identity IS NULL OR c.color_identity = '[]' OR TRIM(c.color_identity) = '')",
+        );
+      } else if (wubrgSel.length) {
+        const sorted = [...new Set(wubrgSel)].sort().join(",");
+        parts.push(
+          "(SELECT GROUP_CONCAT(v, ',') FROM (SELECT j.value AS v FROM json_each(COALESCE(c.color_identity, '[]')) AS j WHERE j.value IN ('W','U','B','R','G') ORDER BY j.value)) = ?",
+        );
+        params.push(sorted);
+      }
+    } else {
+      const ors: string[] = [];
+      for (const col of wubrgSel) {
+        ors.push(`instr(COALESCE(c.color_identity, c.colors, ''), ?) > 0`);
         params.push(`"${col}"`);
+      }
+      if (wantColorless) {
+        ors.push(`(c.color_identity IS NULL OR c.color_identity = '[]' OR TRIM(c.color_identity) = '')`);
+      }
+      if (ors.length === 1) {
+        parts.push(ors[0]!);
+      } else if (ors.length > 1) {
+        parts.push(`(${ors.join(" OR ")})`);
       }
     }
   }
@@ -150,6 +177,20 @@ export function buildHaving(
   }
   if (f.watchlist === true) {
     parts.push(`EXISTS (
+      SELECT 1 FROM watchlist w
+      WHERE w.user_id = ? AND w.scryfall_id IN (SELECT scryfall_id FROM printings px WHERE px.oracle_id = c.oracle_id)
+    )`);
+    params.push(userId);
+  }
+  if (f.owned === false) {
+    parts.push(`NOT EXISTS (
+      SELECT 1 FROM owned_cards o
+      WHERE o.user_id = ? AND o.scryfall_id IN (SELECT scryfall_id FROM printings px WHERE px.oracle_id = c.oracle_id)
+    )`);
+    params.push(userId);
+  }
+  if (f.watchlist === false) {
+    parts.push(`NOT EXISTS (
       SELECT 1 FROM watchlist w
       WHERE w.user_id = ? AND w.scryfall_id IN (SELECT scryfall_id FROM printings px WHERE px.oracle_id = c.oracle_id)
     )`);

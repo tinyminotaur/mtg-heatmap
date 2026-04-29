@@ -24,6 +24,7 @@ export const ROW_SORT_OPTIONS = [
   "price_min",
   "price_max",
   "price_median",
+  "cmc",
 ] as const;
 export type RowSortValue = (typeof ROW_SORT_OPTIONS)[number];
 
@@ -111,6 +112,7 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
   const excludeSetTypes = merged.get("exclTypes")?.split(",").filter(Boolean) ?? [];
   const excludeGroups = merged.get("exclGroups")?.split(",").filter(Boolean) ?? [];
   const colors = merged.get("colors")?.split(",").filter(Boolean) ?? [];
+  const colorMode = merged.get("colorMode") === "exact" ? "exact" : "any";
   const formats = merged.get("formats")?.split(",").filter(Boolean) ?? [];
   const types = merged.get("types")?.split(",").filter(Boolean) ?? [];
   const advancedFilters = merged.get("filters") ? decodeAdvancedFiltersParam(String(merged.get("filters"))) : null;
@@ -150,6 +152,7 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     excludeSetTypes,
     excludeGroups,
     colors,
+    colorMode,
     formats,
     types,
     advancedFilters,
@@ -181,6 +184,8 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     groupBy,
     groupCollapsedKeys,
     headerSortSetCode: merged.get("hcol")?.trim().toLowerCase() || null,
+    headerSortDir:
+      merged.get("hdir") === "asc" ? "asc" : merged.get("hdir") === "desc" ? "desc" : null,
     heatmapColumnLayout: (merged.get("hlay") === "value" ? "value" : "sets") as HeatmapColumnLayout,
     cellPriceField: parseHeatmapCellPriceField(merged),
     quickPinRows: parseQuickPinRows(merged),
@@ -217,6 +222,7 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.excludeSetTypes.length) out.set("exclTypes", f.excludeSetTypes.join(","));
   if (f.excludeGroups.length) out.set("exclGroups", f.excludeGroups.join(","));
   if (f.colors.length) out.set("colors", f.colors.join(","));
+  if (f.colorMode === "exact") out.set("colorMode", "exact");
   if (f.formats.length) out.set("formats", f.formats.join(","));
   if (f.types.length) out.set("types", f.types.join(","));
   if (f.advancedFilters) out.set("filters", encodeAdvancedFiltersParam(f.advancedFilters));
@@ -247,6 +253,7 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.groupBy !== "none") out.set("grp", f.groupBy);
   if (f.groupCollapsedKeys.length) out.set("gc", JSON.stringify(f.groupCollapsedKeys));
   if (f.headerSortSetCode) out.set("hcol", f.headerSortSetCode);
+  if (f.headerSortSetCode && f.headerSortDir) out.set("hdir", f.headerSortDir);
   // Always write `hlay` so it overrides any `s=` blob defaults.
   out.set("hlay", f.heatmapColumnLayout === "value" ? "value" : "sets");
   if (f.cellPriceField !== "usd") out.set("pm", f.cellPriceField);

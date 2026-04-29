@@ -377,6 +377,28 @@ export function HeatmapView() {
     [router, sp],
   );
 
+  const onHeaderSetClick = useCallback(
+    (setCode: string) => {
+      const code = setCode.trim().toLowerCase();
+      const p = new URLSearchParams(sp.toString());
+      const cur = p.get("hcol")?.trim().toLowerCase() ?? "";
+      const curDir = p.get("hdir");
+      if (cur === code) {
+        if (curDir === "asc") {
+          p.set("hdir", "desc");
+        } else {
+          p.delete("hcol");
+          p.delete("hdir");
+        }
+      } else {
+        p.set("hcol", code);
+        p.set("hdir", "asc");
+      }
+      router.replace(`/?${p.toString()}`);
+    },
+    [router, sp],
+  );
+
   const setPage = useCallback(
     (next: number) => {
       const p = new URLSearchParams(sp.toString());
@@ -584,6 +606,11 @@ export function HeatmapView() {
       }
 
       if (e.key === "Escape") {
+        if (t.id === "heatmap-search") {
+          e.preventDefault();
+          setParam("q", null);
+          return;
+        }
         if (cardDetailOpen) {
           e.preventDefault();
           setCardDetailOpen(false);
@@ -712,6 +739,7 @@ export function HeatmapView() {
     cardDetailOpen,
     cancelHoverDismiss,
     previewPinned,
+    setParam,
   ]);
 
   const floatingPreview = useMemo(() => {
@@ -1011,7 +1039,7 @@ export function HeatmapView() {
               onLeaveGrid={clearHoverNow}
               onViewportChange={bumpPinnedAnchor}
               interactionPortRef={heatmapPortRef}
-              onHeaderSetClick={(setCode) => setParam("hcol", setCode)}
+              onHeaderSetClick={onHeaderSetClick}
               onHoverFrozenRowBody={
                 previewPinned || isMobile
                   ? undefined

@@ -38,6 +38,8 @@ function withFacetCleared(
 
 type FacetsResponse = {
   total: number;
+  /** Row-scope-independent counts for status tabs (same base as `rowScope` facet clears). */
+  status: { all: number; owned: number; wishlist: number; none: number };
   rarity: { key: string; n: number }[];
   colorIdentity: { key: string; n: number }[];
   rowScope: { owned: number; watchlist: number; pinned: number; reserved: number };
@@ -177,6 +179,28 @@ export async function GET(req: NextRequest) {
       )
       .get(...baseForRowScope.params, userId) as { n: number };
 
+    const allStatusRow = db
+      .prepare(`SELECT COUNT(*) AS n FROM cards c WHERE ${baseForRowScope.sql}`)
+      .get(...baseForRowScope.params) as { n: number };
+
+    const noneStatusRow = db
+      .prepare(
+        `
+        SELECT COUNT(DISTINCT c.oracle_id) AS n
+        FROM cards c
+        WHERE ${baseForRowScope.sql}
+          AND NOT EXISTS (
+            SELECT 1 FROM owned_cards o
+            WHERE o.user_id = ? AND o.scryfall_id IN (SELECT scryfall_id FROM printings px WHERE px.oracle_id = c.oracle_id)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM watchlist w
+            WHERE w.user_id = ? AND w.scryfall_id IN (SELECT scryfall_id FROM printings px WHERE px.oracle_id = c.oracle_id)
+          )
+      `,
+      )
+      .get(...baseForRowScope.params, userId, userId) as { n: number };
+
     const pinnedRow = db
       .prepare(
         `
@@ -271,6 +295,12 @@ export async function GET(req: NextRequest) {
 
     const out: FacetsResponse = {
       total: totalRow.n ?? 0,
+      status: {
+        all: allStatusRow.n ?? 0,
+        owned: ownedRow.n ?? 0,
+        wishlist: watchRow.n ?? 0,
+        none: noneStatusRow.n ?? 0,
+      },
       rarity: rarityRows.map((r) => ({ key: r.k, n: r.n })),
       colorIdentity: colorRows.map((r) => ({ key: r.k, n: r.n })),
       rowScope: {

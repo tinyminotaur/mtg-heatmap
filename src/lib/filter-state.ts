@@ -7,7 +7,7 @@ import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
 
 /** Up to three row-sort keys; value sorts use dir asc | desc. */
 export type SortSlot = {
-  key: "name" | "printings" | "reserved" | "price_min" | "price_max" | "price_median";
+  key: "name" | "printings" | "reserved" | "price_min" | "price_max" | "price_median" | "cmc";
   dir: "asc" | "desc" | null;
 };
 
@@ -19,6 +19,9 @@ export type HeatmapColumnLayout = "sets" | "value";
 export type MatchDisplayMode = "context" | "strict";
 
 export type GroupByMode = "none" | "reserved" | "color" | "type";
+
+/** Color identity filter: any selected pip vs exact identity match (see `cardWhereClause`). */
+export type ColorMatchMode = "any" | "exact";
 
 export type HeatmapFilters = {
   rarity: string[];
@@ -34,6 +37,8 @@ export type HeatmapFilters = {
   priceMin: number | null;
   priceMax: number | null;
   colors: string[];
+  /** URL `colorMode`; default `any` (omit). */
+  colorMode: ColorMatchMode;
   formats: string[];
   types: string[];
   owned: boolean | null;
@@ -63,6 +68,8 @@ export type HeatmapFilters = {
   groupCollapsedKeys: string[];
   /** §11.5.6 — temporary single-column USD sort override. */
   headerSortSetCode: string | null;
+  /** URL `hdir` when `hcol` set: price sort direction for that column. */
+  headerSortDir: "asc" | "desc" | null;
   /**
    * Session-only: oracle ids pinned to the top; row stays visible and cells ignore printing-level filters
    * (rarity / price / owned / watchlist dimming). URL `qr=`.
@@ -95,6 +102,7 @@ export type FilterState = {
     priceMin: number | null;
     priceMax: number | null;
     colors: string[];
+    colorMode: ColorMatchMode;
     formats: string[];
     types: string[];
     owned: boolean | null;
@@ -122,6 +130,7 @@ export type FilterState = {
     slots: SortSlot[];
     valueAggregationScope: ValueAggregationScope;
     headerPriceSetCode: string | null;
+    headerSortDir: "asc" | "desc" | null;
   };
   group: {
     by: GroupByMode;
@@ -142,6 +151,7 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   priceMin: null,
   priceMax: null,
   colors: [],
+  colorMode: "any",
   formats: [],
   types: [],
   owned: null,
@@ -163,6 +173,7 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   groupBy: "none",
   groupCollapsedKeys: [],
   headerSortSetCode: null,
+  headerSortDir: null,
   quickPinRows: [],
   quickPinCols: [],
   heatmapColumnLayout: "sets",
@@ -184,6 +195,7 @@ export const DEFAULT_FILTER_STATE: FilterState = {
     priceMin: null,
     priceMax: null,
     colors: [],
+    colorMode: "any",
     formats: [],
     types: [],
     owned: null,
@@ -210,6 +222,7 @@ export const DEFAULT_FILTER_STATE: FilterState = {
     slots: [{ key: "name", dir: null }],
     valueAggregationScope: "visible",
     headerPriceSetCode: null,
+    headerSortDir: null,
   },
   group: {
     by: "none",
@@ -225,6 +238,7 @@ const ROW_SORT_KEYS = new Set([
   "price_max",
   "price_median",
   "price_avg",
+  "cmc",
 ]);
 
 export function parseSortSlotToken(token: string): SortSlot | null {
@@ -234,6 +248,10 @@ export function parseSortSlotToken(token: string): SortSlot | null {
   const rawKey = k0.trim();
   if (!ROW_SORT_KEYS.has(rawKey)) return null;
   const key: SortSlot["key"] = rawKey === "price_avg" ? "price_median" : (rawKey as SortSlot["key"]);
+  if (key === "cmc") {
+    const dir: SortSlot["dir"] = d0 === "desc" ? "desc" : "asc";
+    return { key: "cmc", dir };
+  }
   const dir =
     d0 === "asc" || d0 === "desc"
       ? d0
@@ -262,6 +280,10 @@ export function parseSortSlotsFromUrl(sp: URLSearchParams): SortSlot[] {
 
 export function slotsToPrimarySortString(slots: SortSlot[]): string {
   const first = slots[0] ?? { key: "name", dir: null };
+  if (first.key === "cmc") {
+    const d = first.dir ?? "asc";
+    return `cmc:${d}`;
+  }
   if (first.key.startsWith("price_")) {
     const d = first.dir ?? (first.key === "price_min" ? "asc" : "desc");
     return `${first.key}:${d}`;
@@ -290,6 +312,7 @@ export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
     priceMin: fs.filters.priceMin,
     priceMax: fs.filters.priceMax,
     colors: fs.filters.colors,
+    colorMode: fs.filters.colorMode === "exact" ? "exact" : "any",
     formats: fs.filters.formats,
     types: fs.filters.types,
     owned: fs.filters.owned,
@@ -311,6 +334,7 @@ export function filterStateToHeatmapFilters(fs: FilterState): HeatmapFilters {
     groupBy: fs.group.by,
     groupCollapsedKeys: [...fs.group.collapsedKeys],
     headerSortSetCode: fs.sort.headerPriceSetCode,
+    headerSortDir: fs.sort.headerSortDir ?? null,
     heatmapColumnLayout: fs.display.heatmapColumnLayout,
     cellPriceField: fs.display.cellPriceField,
     quickPinRows: [...fs.filters.quickPinRows],
@@ -335,6 +359,7 @@ export function heatmapFiltersToFilterState(f: HeatmapFilters): FilterState {
       priceMin: f.priceMin,
       priceMax: f.priceMax,
       colors: [...f.colors],
+      colorMode: f.colorMode === "exact" ? "exact" : "any",
       formats: [...f.formats],
       types: [...f.types],
       owned: f.owned,
@@ -361,6 +386,7 @@ export function heatmapFiltersToFilterState(f: HeatmapFilters): FilterState {
       slots,
       valueAggregationScope: f.valueAggScope,
       headerPriceSetCode: f.headerSortSetCode,
+      headerSortDir: f.headerSortDir ?? null,
     },
     group: {
       by: f.groupBy,

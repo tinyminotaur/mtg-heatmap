@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, MoreHorizontal, Search } from "lucide-react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { Filter, MoreHorizontal, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,9 +26,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ColumnMeta } from "@/lib/heatmap-query";
-import type { HeatmapFilters, SortSlot } from "@/lib/filter-state";
+import type { SortSlot } from "@/lib/filter-state";
 import { defaultHeatmapFilters, slotsToPrimarySortString } from "@/lib/filter-state";
-import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
+import { serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
 import type { SortingState, VisibilityState } from "@tanstack/react-table";
 import { heatmapFiltersToTanStackState } from "@/lib/heatmap/tanstack-adapter";
 import {
@@ -44,6 +44,19 @@ import { cn } from "@/lib/utils";
 import { HeatmapFilterColumns } from "./HeatmapFilterColumns";
 import { FilterFieldTip } from "./FilterFieldTip";
 import { useQuery } from "@tanstack/react-query";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useHeatmapUrlFilters } from "@/hooks/use-heatmap-url-filters";
+import { applyRowStatus } from "@/lib/heatmap/row-status";
+import { buildActiveFilterChips, clearChip } from "@/lib/heatmap/active-filter-chips";
+import { ActiveFiltersRow } from "@/components/heatmap/filter-bar/ActiveFiltersRow";
+import { ColorFilter } from "@/components/heatmap/filter-bar/ColorFilter";
+import { FilterSearch } from "@/components/heatmap/filter-bar/FilterSearch";
+import { PriceFilter } from "@/components/heatmap/filter-bar/PriceFilter";
+import { RarityFilter } from "@/components/heatmap/filter-bar/RarityFilter";
+import { SaveViewDialog } from "@/components/heatmap/filter-bar/SaveViewDialog";
+import { SetsPicker } from "@/components/heatmap/filter-bar/SetsPicker";
+import { StatusTabs } from "@/components/heatmap/filter-bar/StatusTabs";
+import { ViewsSelector } from "@/components/heatmap/filter-bar/ViewsSelector";
 
 export type ViewSessionMeta = { activeViewId: string | null; snapshotQuery: string | null };
 
@@ -74,14 +87,6 @@ type Props = {
   onOpenWishlistPanel?: () => void;
 };
 
-function filtersFromQuery(qs: string): HeatmapFilters {
-  return parseHeatmapUrlSearchParams(new URLSearchParams(qs));
-}
-
-function applyFilters(onReplaceQuery: (p: URLSearchParams) => void, f: HeatmapFilters) {
-  onReplaceQuery(serializeHeatmapUrlParams({ ...defaultHeatmapFilters, ...f }));
-}
-
 const SORT_LABEL: Record<SortSlot["key"], string> = {
   name: "Name",
   printings: "Printings",
@@ -89,6 +94,7 @@ const SORT_LABEL: Record<SortSlot["key"], string> = {
   price_min: "Min $",
   price_max: "Max $",
   price_median: "Median $",
+  cmc: "CMC",
 };
 
 export function HeatmapFilterBar({
@@ -112,11 +118,12 @@ export function HeatmapFilterBar({
   onOpenWishlistPanel,
 }: Props) {
   const router = useRouter();
-  const f = useMemo(() => filtersFromQuery(queryString), [queryString]);
+  const { filters: f, patch } = useHeatmapUrlFilters(queryString, onReplaceQuery);
 
   const facetsUrl = useMemo(() => `/api/heatmap/facets?${queryString}`, [queryString]);
-  const { data: facets } = useQuery<{
+  const { data: facets, isFetching: facetsLoading } = useQuery<{
     total: number;
+    status: { all: number; owned: number; wishlist: number; none: number };
     rarity: { key: string; n: number }[];
     colorIdentity: { key: string; n: number }[];
     rowScope: { owned: number; watchlist: number; pinned: number; reserved: number };
@@ -133,20 +140,14 @@ export function HeatmapFilterBar({
       if (!res.ok) throw new Error("facets");
       return res.json();
     },
-    staleTime: 15_000,
+    staleTime: 30_000,
   });
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [newName, setNewName] = useState("");
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   useEffect(() => {
     startTransition(() => setSavedViews(ensureSavedViewsLoaded()));
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    };
   }, []);
 
   useEffect(() => {
@@ -191,36 +192,6 @@ export function HeatmapFilterBar({
     onViewSessionChange({ activeViewId: v.id, snapshotQuery: queryString });
     setNewName("");
   }, [newName, queryString, savedViews, onViewSessionChange]);
-
-  const quickNewView = useCallback(() => {
-    const name = `View ${savedViews.length + 1}`;
-    const v: SavedView = {
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      name,
-      query: queryString,
-    };
-    const next = upsertSavedView(savedViews, v);
-    setSavedViews(next);
-    onViewSessionChange({ activeViewId: v.id, snapshotQuery: queryString });
-  }, [queryString, savedViews, onViewSessionChange]);
-
-  const patch = useCallback(
-    (mut: (base: HeatmapFilters) => HeatmapFilters) => {
-      const base = filtersFromQuery(queryString);
-      applyFilters(onReplaceQuery, mut(base));
-    },
-    [onReplaceQuery, queryString],
-  );
-
-  const applySearchDebounced = useCallback(
-    (text: string) => {
-      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-      searchDebounceRef.current = setTimeout(() => {
-        patch((b) => ({ ...b, search: text }));
-      }, 320);
-    },
-    [patch],
-  );
 
   const setSortSlots = (slots: SortSlot[]) => {
     const next = slots.slice(0, 3);
@@ -280,7 +251,57 @@ export function HeatmapFilterBar({
     return n;
   }, [f.includeDigital, f.reservedOnly, f.owned, f.watchlist, f.pinned]);
 
-  const cardSearchMountKey = useMemo(() => new URLSearchParams(queryString).get("q") ?? "", [queryString]);
+  const activeChips = useMemo(() => buildActiveFilterChips(f), [f]);
+
+  const onClearFilterState = useCallback(() => {
+    onReplaceQuery(
+      serializeHeatmapUrlParams({
+        ...defaultHeatmapFilters,
+        cellPriceField: f.cellPriceField,
+        heatmapColumnLayout: f.heatmapColumnLayout,
+        colSort: f.colSort,
+        valueAggScope: f.valueAggScope,
+        showPinned: f.showPinned,
+        matchMode: f.matchMode,
+        pageSize: f.pageSize,
+        quickPinRows: f.quickPinRows,
+        quickPinCols: f.quickPinCols,
+      }),
+    );
+  }, [
+    f.cellPriceField,
+    f.colSort,
+    f.heatmapColumnLayout,
+    f.matchMode,
+    f.pageSize,
+    f.quickPinCols,
+    f.quickPinRows,
+    f.showPinned,
+    f.valueAggScope,
+    onReplaceQuery,
+  ]);
+
+  const createNamedView = useCallback(
+    (name: string) => {
+      const v: SavedView = {
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        query: queryString,
+      };
+      const next = upsertSavedView(savedViews, v);
+      setSavedViews(next);
+      onViewSessionChange({ activeViewId: v.id, snapshotQuery: queryString });
+    },
+    [queryString, savedViews, onViewSessionChange],
+  );
+
+  const renameView = useCallback((id: string, name: string) => {
+    setSavedViews((prev) => {
+      const next = prev.map((v) => (v.id === id ? { ...v, name } : v));
+      persistSavedViews(next);
+      return next;
+    });
+  }, []);
 
   const toggleRarity = (r: string) => {
     patch((b) => {
@@ -328,197 +349,321 @@ export function HeatmapFilterBar({
       className="flex min-h-0 shrink-0 flex-col rounded-lg border border-border bg-muted/20 text-sm"
       suppressHydrationWarning
     >
-      {/* Toolbar: matches wireframe — toggle, title, views, search, more */}
-      <div className="flex min-h-10 w-full items-center gap-1.5 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
-        <button
-          type="button"
-          className="flex shrink-0 items-center gap-1 rounded-md p-1 hover:bg-muted/50"
-          onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
-          aria-expanded={filtersRootOpen}
-          aria-label={filtersRootOpen ? "Collapse filters" : "Expand filters"}
-        >
-          <ChevronRight
-            className={cn(
-              "size-4 text-muted-foreground transition-transform",
-              filtersRootOpen && "rotate-90",
-            )}
-          />
-        </button>
-        <span className="hidden shrink-0 font-medium sm:inline">Filter &amp; Sort</span>
-
-        <div className="min-h-8 min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex w-max items-center gap-1 pr-1">
-            {savedViews.map((v) => (
-              <Button
-                key={v.id}
-                type="button"
-                variant={activeViewId === v.id ? "secondary" : "outline"}
-                size="sm"
-                className="h-8 shrink-0 rounded-full px-3 text-xs"
-                onClick={() => selectView(v)}
-              >
-                {v.name}
-                {activeViewId === v.id && dirty ? (
-                  <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" title="Unsaved" />
-                ) : null}
-              </Button>
-            ))}
-            <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2 text-xs" onClick={quickNewView}>
-              + New
-            </Button>
-          </div>
-        </div>
-
-        <div className="relative min-w-0 max-w-[42%] sm:max-w-[220px]">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            id="heatmap-search"
-            className="h-8 border-border/80 bg-background pl-8 text-xs"
-            placeholder="Search cards…"
-            defaultValue={f.search}
-            key={cardSearchMountKey}
-            onChange={(e) => applySearchDebounced(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-                patch((b) => ({ ...b, search: (e.target as HTMLInputElement).value }));
-              }
+      {/* Filter bar: sticky on md+, mobile sheet for full controls */}
+      <div className="sticky top-0 z-40 rounded-lg border border-border bg-muted/25 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-muted/15">
+        <div className="hidden flex-wrap items-center gap-x-2 gap-y-2 px-2 py-2 md:flex md:px-3">
+          <ViewsSelector
+            savedViews={savedViews}
+            activeViewId={activeViewId}
+            queryString={queryString}
+            onSelectView={selectView}
+            onDeleteView={(id) => {
+              const next = deleteSavedView(savedViews, id);
+              setSavedViews(next);
+              onViewSessionChange({ activeViewId: null, snapshotQuery: null });
             }}
+            onRenameView={renameView}
+            onSaveCurrentView={() => setSaveDialogOpen(true)}
           />
+          <FilterSearch
+            value={f.search}
+            onChange={(v) => patch((b) => ({ ...b, search: v }))}
+          />
+          <ColorFilter
+            selected={f.colors.filter((c) => ["W", "U", "B", "R", "G"].includes(c))}
+            onChange={(colors) =>
+              patch((b) => {
+                const keepC = b.colors.filter((c) => c === "C");
+                return { ...b, colors: [...new Set([...colors, ...keepC])].sort() };
+              })
+            }
+            mode={f.colorMode}
+            onModeChange={(colorMode) => patch((b) => ({ ...b, colorMode }))}
+          />
+          <RarityFilter
+            selected={f.rarity}
+            onChange={(rarity) => patch((b) => ({ ...b, rarity }))}
+          />
+          <SetsPicker
+            selectedSets={f.sets}
+            onSelectedSetsChange={(sets) => patch((b) => ({ ...b, sets }))}
+            includeDigital={f.includeDigital}
+            onPresetReservedRows={() => patch((b) => ({ ...b, reservedOnly: true }))}
+          />
+          <StatusTabs
+            filters={f}
+            onTabChange={(tab) => patch((b) => applyRowStatus(b, tab))}
+            counts={facets?.status}
+            loading={facetsLoading}
+          />
+          <PriceFilter
+            priceMin={f.priceMin}
+            priceMax={f.priceMax}
+            onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1 text-xs"
+            onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
+          >
+            <SlidersHorizontal className="size-3.5" />
+            Advanced
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "icon" }),
+                "size-9 shrink-0",
+              )}
+              aria-label="More view and display options"
+            >
+              <MoreHorizontal className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {activeViewId ? (
+                <>
+                  <DropdownMenuItem disabled={!dirty} onClick={saveActiveView}>
+                    Save view
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                  New saved view
+                </DropdownMenuLabel>
+                <div className="flex gap-2 px-2 pb-2">
+                  <Input
+                    placeholder="Name"
+                    className="h-8 text-xs"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                  />
+                  <Button type="button" size="sm" className="h-8 shrink-0 text-xs" onClick={createView}>
+                    Save as…
+                  </Button>
+                </div>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => {
+                  onPersistNav?.();
+                  if (onOpenOwnedPanel) onOpenOwnedPanel();
+                  else router.push("/owned");
+                }}
+              >
+                Owned
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  onPersistNav?.();
+                  if (onOpenWishlistPanel) onOpenWishlistPanel();
+                  else router.push("/watchlist");
+                }}
+              >
+                Wishlist
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onOpenCommandPalette}>Command palette (⌘K)</DropdownMenuItem>
+              <DropdownMenuItem onClick={onOpenKeyboardHelp}>Keyboard shortcuts (?)</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {activeViewId ? (
+                <>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (!activeViewId) return;
+                      setSavedViews(duplicateSavedView(savedViews, activeViewId));
+                    }}
+                  >
+                    Duplicate view
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => {
+                      if (!activeViewId) return;
+                      const next = deleteSavedView(savedViews, activeViewId);
+                      setSavedViews(next);
+                      onViewSessionChange({ activeViewId: null, snapshotQuery: null });
+                    }}
+                  >
+                    Delete view
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-xs">Display</DropdownMenuLabel>
+                <div className="space-y-2 px-2 pb-2">
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-muted-foreground">Price field</span>
+                    <Select
+                      value={f.cellPriceField}
+                      onValueChange={(v) =>
+                        patch((b) => ({
+                          ...b,
+                          cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="usd">USD</SelectItem>
+                        <SelectItem value="usd_foil">USD foil</SelectItem>
+                        <SelectItem value="eur">EUR</SelectItem>
+                        <SelectItem value="tix">TIX</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-muted-foreground">Density</span>
+                    <Select
+                      value={density}
+                      onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="comfy">Comfy</SelectItem>
+                        <SelectItem value="compact">Compact</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs">
+                    <Checkbox
+                      checked={f.matchMode === "strict"}
+                      onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
+                    />
+                    Strict cells
+                  </label>
+                  <label className="flex items-center gap-2 text-xs">
+                    <Checkbox
+                      checked={f.showPinned}
+                      onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))}
+                    />
+                    Pinned strip
+                  </label>
+                </div>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className={cn(
-              buttonVariants({ variant: "ghost", size: "icon" }),
-              "size-8 shrink-0 sm:size-9",
-            )}
-            aria-label="More view and display options"
+        <div className="flex items-center gap-2 px-2 py-2 md:hidden">
+          <FilterSearch
+            className="min-w-0 flex-1"
+            value={f.search}
+            onChange={(v) => patch((b) => ({ ...b, search: v }))}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-9 shrink-0 gap-1 px-2 text-xs"
+            onClick={() => setMobileFiltersOpen(true)}
+          >
+            <Filter className="size-4" aria-hidden />
+            Filters ({activeChips.length})
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="size-9 shrink-0"
+            aria-label="Advanced filters"
+            onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
           >
             <MoreHorizontal className="size-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            {activeViewId ? (
-              <>
-                <DropdownMenuItem disabled={!dirty} onClick={saveActiveView}>
-                  Save view
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">New saved view</DropdownMenuLabel>
-              <div className="flex gap-2 px-2 pb-2">
-                <Input
-                  placeholder="Name"
-                  className="h-8 text-xs"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                />
-                <Button type="button" size="sm" className="h-8 shrink-0 text-xs" onClick={createView}>
-                  Save as…
-                </Button>
-              </div>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => {
-                onPersistNav?.();
-                if (onOpenOwnedPanel) onOpenOwnedPanel();
-                else router.push("/owned");
-              }}
-            >
-              Owned
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                onPersistNav?.();
-                if (onOpenWishlistPanel) onOpenWishlistPanel();
-                else router.push("/watchlist");
-              }}
-            >
-              Watchlist
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenCommandPalette}>Command palette (⌘K)</DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenKeyboardHelp}>Keyboard shortcuts (?)</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {activeViewId ? (
-              <>
-                <DropdownMenuItem
-                  onClick={() => {
-                    if (!activeViewId) return;
-                    setSavedViews(duplicateSavedView(savedViews, activeViewId));
-                  }}
-                >
-                  Duplicate view
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => {
-                    if (!activeViewId) return;
-                    const next = deleteSavedView(savedViews, activeViewId);
-                    setSavedViews(next);
-                    onViewSessionChange({ activeViewId: null, snapshotQuery: null });
-                  }}
-                >
-                  Delete view
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="text-xs">Display</DropdownMenuLabel>
-              <div className="space-y-2 px-2 pb-2">
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground">Price field</span>
-                  <Select
-                    value={f.cellPriceField}
-                    onValueChange={(v) =>
-                      patch((b) => ({
-                        ...b,
-                        cellPriceField: v === "usd_foil" || v === "eur" || v === "tix" ? v : "usd",
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="usd">USD</SelectItem>
-                      <SelectItem value="usd_foil">USD foil</SelectItem>
-                      <SelectItem value="eur">EUR</SelectItem>
-                      <SelectItem value="tix">TIX</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground">Density</span>
-                  <Select value={density} onValueChange={(v) => onDensityChange(v === "compact" ? "compact" : "comfy")}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="comfy">Comfy</SelectItem>
-                      <SelectItem value="compact">Compact</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <label className="flex items-center gap-2 text-xs">
-                  <Checkbox
-                    checked={f.matchMode === "strict"}
-                    onCheckedChange={(v) => patch((b) => ({ ...b, matchMode: v ? "strict" : "context" }))}
-                  />
-                  Strict cells
-                </label>
-                <label className="flex items-center gap-2 text-xs">
-                  <Checkbox checked={f.showPinned} onCheckedChange={(v) => patch((b) => ({ ...b, showPinned: Boolean(v) }))} />
-                  Pinned strip
-                </label>
-              </div>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </Button>
+        </div>
+
+        <ActiveFiltersRow
+          chips={activeChips}
+          onRemove={(id) => patch((b) => clearChip(b, id))}
+          onClearAll={onClearFilterState}
+          onSaveView={() => setSaveDialogOpen(true)}
+        />
       </div>
+
+      <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
+        <SheetContent side="bottom" className="flex max-h-[85dvh] flex-col gap-0 p-0">
+          <SheetHeader className="border-b border-border px-4 py-3">
+            <SheetTitle>Filters</SheetTitle>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3">
+            <section className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Colors</p>
+              <ColorFilter
+                selected={f.colors.filter((c) => ["W", "U", "B", "R", "G"].includes(c))}
+                onChange={(colors) =>
+                  patch((b) => {
+                    const keepC = b.colors.filter((c) => c === "C");
+                    return { ...b, colors: [...new Set([...colors, ...keepC])].sort() };
+                  })
+                }
+                mode={f.colorMode}
+                onModeChange={(colorMode) => patch((b) => ({ ...b, colorMode }))}
+              />
+            </section>
+            <section className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Rarity</p>
+              <RarityFilter
+                selected={f.rarity}
+                onChange={(rarity) => patch((b) => ({ ...b, rarity }))}
+              />
+            </section>
+            <section className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Status</p>
+              <StatusTabs
+                filters={f}
+                onTabChange={(tab) => patch((b) => applyRowStatus(b, tab))}
+                counts={facets?.status}
+                loading={facetsLoading}
+              />
+            </section>
+            <section className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Price</p>
+              <PriceFilter
+                priceMin={f.priceMin}
+                priceMax={f.priceMax}
+                onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
+              />
+            </section>
+            <section className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Sets</p>
+              <SetsPicker
+                selectedSets={f.sets}
+                onSelectedSetsChange={(sets) => patch((b) => ({ ...b, sets }))}
+                includeDigital={f.includeDigital}
+                onPresetReservedRows={() => patch((b) => ({ ...b, reservedOnly: true }))}
+              />
+            </section>
+          </div>
+          <SheetFooter className="border-t border-border px-4 py-3">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => setMobileFiltersOpen(false)}
+            >
+              Show {(facets?.status?.all ?? facets?.total ?? 0).toLocaleString()} results
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      <SaveViewDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        currentFilters={f}
+        visibleColumnCount={columns.filter((c) => c.set_type !== "aggregate" && !c.code.startsWith("__")).length}
+        onSave={(name) => {
+          createNamedView(name);
+          setSaveDialogOpen(false);
+        }}
+      />
 
       {filtersRootOpen ? (
         <div className="max-h-[min(58dvh,520px)] overflow-y-auto border-t border-border px-2 pb-3 pt-2 sm:max-h-[min(70dvh,720px)] sm:px-3">
@@ -886,8 +1031,12 @@ export function HeatmapFilterBar({
                             value={primarySort.key}
                             onValueChange={(key) => {
                               const k = key as SortSlot["key"];
-                              const dir: SortSlot["dir"] =
-                                k === "price_min" ? "asc" : k.startsWith("price_") ? "desc" : null;
+                              let dir: SortSlot["dir"] = null;
+                              if (k.startsWith("price_")) {
+                                dir = k === "price_min" ? "asc" : "desc";
+                              } else if (k === "cmc") {
+                                dir = "asc";
+                              }
                               setSortSlots([{ key: k, dir }]);
                             }}
                           >
@@ -907,6 +1056,22 @@ export function HeatmapFilterBar({
                       {primarySort.key.startsWith("price_") ? (
                         <Select
                           value={primarySort.dir ?? (primarySort.key === "price_min" ? "asc" : "desc")}
+                          onValueChange={(dir) => {
+                            const d = dir as "asc" | "desc";
+                            setSortSlots([{ ...primarySort, dir: d }, ...f.sortSlots.slice(1, 3)]);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-24 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="asc">Asc</SelectItem>
+                            <SelectItem value="desc">Desc</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : primarySort.key === "cmc" ? (
+                        <Select
+                          value={primarySort.dir ?? "asc"}
                           onValueChange={(dir) => {
                             const d = dir as "asc" | "desc";
                             setSortSlots([{ ...primarySort, dir: d }, ...f.sortSlots.slice(1, 3)]);
@@ -957,7 +1122,7 @@ export function HeatmapFilterBar({
                             type="button"
                             className="ml-1 rounded hover:bg-muted"
                             aria-label="Clear column sort"
-                            onClick={() => patch((b) => ({ ...b, headerSortSetCode: null }))}
+                            onClick={() => patch((b) => ({ ...b, headerSortSetCode: null, headerSortDir: null }))}
                           >
                             ×
                           </button>

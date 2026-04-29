@@ -6,6 +6,8 @@ export type SavedView = {
   /** Serialized URL query (no leading `?`). */
   query: string;
   isDefault?: boolean;
+  /** Shipped views — not removable from the selector. */
+  builtIn?: boolean;
 };
 
 const STORAGE_KEY = "mtg-heatmap:saved-views-v1";
@@ -41,9 +43,9 @@ export function persistSavedViews(views: SavedView[]): void {
 
 export function seedSavedViews(): SavedView[] {
   const defaults: SavedView[] = [
-    { id: "sv-default", name: "Default", query: "", isDefault: true },
-    { id: "sv-reserved", name: "Reserved", query: "reserved=1", isDefault: false },
-    { id: "sv-owned", name: "Owned", query: "owned=1", isDefault: false },
+    { id: "sv-default", name: "All Cards", query: "", isDefault: true, builtIn: true },
+    { id: "sv-owned", name: "My Collection", query: "owned=1", isDefault: false, builtIn: true },
+    { id: "sv-wishlist", name: "Wishlist", query: "watchlist=1", isDefault: false, builtIn: true },
   ];
   persistSavedViews(defaults);
   return defaults;

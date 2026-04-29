@@ -22,6 +22,7 @@ function columnIdToSortSlotKey(id: string): SortSlot["key"] | null {
     case "price_min":
     case "price_max":
     case "price_median":
+    case "cmc":
       return id;
     default:
       return null;
@@ -29,6 +30,9 @@ function columnIdToSortSlotKey(id: string): SortSlot["key"] | null {
 }
 
 function sortSlotDirToDesc(slot: SortSlot): boolean {
+  if (slot.key === "cmc") {
+    return (slot.dir ?? "asc") === "desc";
+  }
   // For non-price sorts, SQL uses fixed direction; keep TanStack direction stable anyway.
   if (!slot.key.startsWith("price_")) return false;
   const d = slot.dir ?? (slot.key === "price_min" ? "asc" : "desc");
@@ -40,7 +44,8 @@ function sortingStateToSortSlots(sorting: SortingState): SortSlot[] {
   for (const s of sorting.slice(0, 3)) {
     const key = columnIdToSortSlotKey(String(s.id));
     if (!key) continue;
-    const dir: SortSlot["dir"] = key.startsWith("price_") ? (s.desc ? "desc" : "asc") : null;
+    const dir: SortSlot["dir"] =
+      key === "cmc" || key.startsWith("price_") ? (s.desc ? "desc" : "asc") : null;
     slots.push({ key, dir });
   }
   return slots.length ? slots : [{ key: "name", dir: null }];

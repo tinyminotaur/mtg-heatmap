@@ -125,7 +125,8 @@ function buildRowOrdering(
     selectParts.push(`${headerCol} AS _hdr_price`);
     params.push(fx.headerSortSetCode, ...rarityParams);
     // Portable nulls-last (SQLite <3.30 has no NULLS LAST in ORDER BY).
-    orderParts.push(`(CASE WHEN _hdr_price IS NULL THEN 1 ELSE 0 END), _hdr_price DESC`);
+    const headerDir = fx.headerSortDir === "asc" ? "ASC" : "DESC";
+    orderParts.push(`(CASE WHEN _hdr_price IS NULL THEN 1 ELSE 0 END), _hdr_price ${headerDir}`);
   }
 
   if (groupExpr && fx.groupBy !== "none") {
@@ -144,6 +145,13 @@ function buildRowOrdering(
     }
     if (slot.key === "printings") {
       orderParts.push(`(SELECT COUNT(*) FROM printings p0 WHERE p0.oracle_id = c.oracle_id) DESC`);
+      continue;
+    }
+    if (slot.key === "cmc") {
+      const cdir = slot.dir === "desc" ? "DESC" : "ASC";
+      orderParts.push(
+        `(CASE WHEN c.cmc IS NULL THEN 1 ELSE 0 END), COALESCE(c.cmc, 0) ${cdir}`,
+      );
       continue;
     }
     if (!setOrder.length) continue;
