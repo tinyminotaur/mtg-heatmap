@@ -480,21 +480,24 @@ export async function getHeatmapData(
       continue;
     }
     const cur = pmap.get(pr.set_code)!;
-    const curPromo = Number(cur.is_promo ?? 0);
-    const nextPromo = Number(pr.is_promo ?? 0);
-    if (curPromo !== nextPromo && nextPromo < curPromo) {
+    const score = (p: PrintingRow) => {
+      const promo = Number(p.is_promo ?? 0);
+      const foilOnly = Number(p.is_foil_only ?? 0);
+      const nonfoilOnly = Number(p.is_nonfoil_only ?? 0);
+      // Prefer broadly-available paper printings.
+      // 0 = both finishes available, 1 = nonfoil-only, 2 = foil-only (often missing `usd`).
+      const finish =
+        foilOnly === 0 && nonfoilOnly === 0 ? 0 : nonfoilOnly > 0 ? 1 : foilOnly > 0 ? 2 : 1;
+      return { promo, finish };
+    };
+    const a = score(cur);
+    const b = score(pr);
+    if (b.promo < a.promo) {
       pmap.set(pr.set_code, pr);
       continue;
     }
-    const curFoilOnly = Number(cur.is_foil_only ?? 0);
-    const nextFoilOnly = Number(pr.is_foil_only ?? 0);
-    if (curFoilOnly !== nextFoilOnly && nextFoilOnly < curFoilOnly) {
-      pmap.set(pr.set_code, pr);
-      continue;
-    }
-    const curNonfoilOnly = Number(cur.is_nonfoil_only ?? 0);
-    const nextNonfoilOnly = Number(pr.is_nonfoil_only ?? 0);
-    if (curNonfoilOnly !== nextNonfoilOnly && nextNonfoilOnly < curNonfoilOnly) {
+    if (b.promo > a.promo) continue;
+    if (b.finish < a.finish) {
       pmap.set(pr.set_code, pr);
       continue;
     }
