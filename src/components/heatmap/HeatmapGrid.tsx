@@ -238,6 +238,15 @@ function drawCellCenterMark(
   ctx.restore();
 }
 
+function cellHasAnyPrice(cell: { usd: number | null; usd_foil: number | null; eur: number | null; tix: number | null }) {
+  return (
+    (cell.usd != null && cell.usd > 0) ||
+    (cell.usd_foil != null && cell.usd_foil > 0) ||
+    (cell.eur != null && cell.eur > 0) ||
+    (cell.tix != null && cell.tix > 0)
+  );
+}
+
 /** Viewport-sized canvas + off-screen scroll spacer so large grids stay GPU-friendly. */
 export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function HeatmapGrid(
   {
@@ -455,7 +464,16 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
           /** Bottom-left book only intrudes on price width; star is top-left. */
           const leftGlyphReserve = cell.owned_qty > 0 ? 18 : 0;
-          drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null, leftGlyphReserve);
+          const fallbackLabel = cellHasAnyPrice(cell) ? "—" : "No$";
+          drawCellPriceLabel(
+            ctx,
+            vx,
+            vy,
+            priceLabel ?? fallbackLabel,
+            dark,
+            priceLabel != null,
+            leftGlyphReserve,
+          );
         }
       }
     }

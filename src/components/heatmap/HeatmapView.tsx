@@ -1782,6 +1782,12 @@ export function HeatmapView() {
               <div className="font-mono text-xs">
                 USD {floatingPreview.cell.usd ?? "—"} · Foil {floatingPreview.cell.usd_foil ?? "—"}
               </div>
+              {floatingPreview.cell.usd == null &&
+              floatingPreview.cell.usd_foil == null &&
+              floatingPreview.cell.eur == null &&
+              floatingPreview.cell.tix == null ? (
+                <div className="text-xs text-muted-foreground">No price data for this printing.</div>
+              ) : null}
               {floatingPreview.cell.rarity ? (
                 <div className="text-xs text-muted-foreground">Rarity: {floatingPreview.cell.rarity}</div>
               ) : null}
