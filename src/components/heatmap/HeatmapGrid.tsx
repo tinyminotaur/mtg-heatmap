@@ -247,6 +247,10 @@ function cellHasAnyPrice(cell: { usd: number | null; usd_foil: number | null; eu
   );
 }
 
+function cellHasAnyImage(cell: { image_small: string | null; image_normal?: string | null; image_large?: string | null }) {
+  return Boolean(cell.image_large || cell.image_normal || cell.image_small);
+}
+
 /** Viewport-sized canvas + off-screen scroll spacer so large grids stay GPU-friendly. */
 export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function HeatmapGrid(
   {
@@ -456,6 +460,16 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           drawCellCenterMark(ctx, vx, vy, "⦸", dark);
         }
         if (cell && !strictHide) {
+          const hasAnyPrice = cellHasAnyPrice(cell);
+          const hasAnyImage = cellHasAnyImage(cell);
+          const missingFromSource = !hasAnyPrice || !hasAnyImage;
+          if (missingFromSource) {
+            // Printing exists, but we're missing upstream data (price and/or image).
+            // Keep this subtle but distinct from a truly-empty cell.
+            ctx.fillStyle = dark ? "rgba(96,165,250,0.10)" : "rgba(59,130,246,0.07)";
+            ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
+            drawCellCenterMark(ctx, vx, vy, "?", dark);
+          }
           drawCellScopeGlyphs(ctx, vx, vy, cell, dark);
           const badges: { label: string; variant: "low" | "high" }[] = [];
           if (row.price_low_cols.includes(c)) badges.push({ label: "Min", variant: "low" });
@@ -464,7 +478,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
           const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
           /** Bottom-left book only intrudes on price width; star is top-left. */
           const leftGlyphReserve = cell.owned_qty > 0 ? 18 : 0;
-          const fallbackLabel = cellHasAnyPrice(cell) ? "—" : "No$";
+          const fallbackLabel = hasAnyPrice ? "—" : "No$";
           drawCellPriceLabel(
             ctx,
             vx,

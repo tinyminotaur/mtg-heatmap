@@ -1760,7 +1760,13 @@ export function HeatmapView() {
                   decoding="async"
                 />
               </div>
-            ) : null}
+            ) : (
+              <div className="flex justify-center border-b border-border pb-3">
+                <div className="flex h-[220px] w-full max-w-[260px] items-center justify-center rounded-md border border-dashed border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
+                  No image URL on file
+                </div>
+              </div>
+            )}
             <div className="min-w-0 space-y-1.5 text-sm">
               <div className="font-medium leading-tight">{rows[floatingPreview.row]?.name}</div>
               <div className="text-muted-foreground">
@@ -1786,7 +1792,14 @@ export function HeatmapView() {
               floatingPreview.cell.usd_foil == null &&
               floatingPreview.cell.eur == null &&
               floatingPreview.cell.tix == null ? (
-                <div className="text-xs text-muted-foreground">No price data for this printing.</div>
+                <div className="text-xs text-muted-foreground">
+                  We have this printing on file, but our price data source didn’t include prices for it.
+                </div>
+              ) : null}
+              {!cardImageUrlForPreview(floatingPreview.cell) ? (
+                <div className="text-xs text-muted-foreground">
+                  We have this printing on file, but our data source didn’t include an image URL for it.
+                </div>
               ) : null}
               {floatingPreview.cell.rarity ? (
                 <div className="text-xs text-muted-foreground">Rarity: {floatingPreview.cell.rarity}</div>
