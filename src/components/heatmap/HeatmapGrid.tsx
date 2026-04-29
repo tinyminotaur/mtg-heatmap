@@ -26,6 +26,7 @@ import {
   type HeatmapCellAnchorRect,
   visibleGridRange,
 } from "@/lib/heatmap/grid-geometry";
+import { scryfallSetIconSvgUrl } from "@/lib/set-icon-url";
 import {
   drawManaCostRight,
   drawTypeGlyphInStrip,
@@ -659,14 +660,13 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
       if (col.set_type === "aggregate") continue;
       if (setImagesRef.current.has(col.code)) continue;
       const primary = col.icon_svg_path?.trim();
-      const fallback = `https://svgs.scryfall.io/sets/${col.code.toLowerCase()}.svg`;
+      const fallback = scryfallSetIconSvgUrl(col.code);
       const img = new Image();
       img.decoding = "async";
       let triedFallback = false;
       const usePrimary =
         Boolean(primary) &&
         // Avoid spamming 404s when local set icons are not deployed (common in hosted environments).
-        // Prefer Scryfall’s canonical SVGs instead.
         !primary!.startsWith("/set-icons/");
       img.onload = () => {
         if (cancelled) return;

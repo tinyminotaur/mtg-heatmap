@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { resolveSetIconSvgUrl } from "@/lib/set-icon-url";
 import { cn } from "@/lib/utils";
 
 export function SetIcon({
@@ -15,7 +16,8 @@ export function SetIcon({
   size?: number;
 }) {
   const [failed, setFailed] = useState(false);
-  if (!iconPath || failed) {
+  const src = resolveSetIconSvgUrl(code, iconPath);
+  if (failed) {
     return (
       <span
         className={cn(
@@ -32,7 +34,7 @@ export function SetIcon({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={iconPath}
+      src={src}
       alt=""
       width={size}
       height={size}

@@ -6,6 +6,7 @@ import { useTheme } from "@/components/app-theme-provider";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { resolveSetIconSvgUrl } from "@/lib/set-icon-url";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { HEATMAP_MAX_PAGE_SIZE } from "@/lib/constants";
@@ -1313,10 +1314,10 @@ export function HeatmapView() {
               <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/40">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={
-                    columns[editionHeaderHover.col]!.icon_svg_path?.trim() ||
-                    `https://svgs.scryfall.io/sets/${columns[editionHeaderHover.col]!.code.toLowerCase()}.svg`
-                  }
+                  src={resolveSetIconSvgUrl(
+                    columns[editionHeaderHover.col]!.code,
+                    columns[editionHeaderHover.col]!.icon_svg_path,
+                  )}
                   alt=""
                   width={56}
                   height={56}
