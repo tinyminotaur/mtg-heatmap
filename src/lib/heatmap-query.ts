@@ -463,6 +463,8 @@ export function getHeatmapData(
             tix: p.tix,
             rarity: p.rarity,
             image_small: p.image_uri_small,
+            image_normal: p.image_uri_normal,
+            image_large: p.image_uri_large,
             scryfall_uri: p.scryfall_uri,
             tcgplayer_url: p.tcgplayer_url,
             cardmarket_url: p.cardmarket_url,

@@ -380,6 +380,38 @@ export function HeatmapFilterBar({
             priceMax={f.priceMax}
             onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
           />
+          <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/25 px-2 py-1">
+            <span className="text-[10px] font-medium text-muted-foreground">Edition</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={f.heatmapColumnLayout === "value"}
+              title={
+                f.heatmapColumnLayout === "value"
+                  ? "Showing Min / Median / Max rollup columns — click for per-edition columns"
+                  : "Showing one column per edition — click for Min / Median / Max rollup"
+              }
+              className={cn(
+                "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                f.heatmapColumnLayout === "value" ? "bg-primary" : "bg-muted",
+              )}
+              onClick={() =>
+                patch((b) => ({
+                  ...b,
+                  heatmapColumnLayout: b.heatmapColumnLayout === "value" ? "sets" : "value",
+                }))
+              }
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block size-4 translate-x-0.5 rounded-full bg-background shadow-sm ring-1 ring-border transition-transform",
+                  f.heatmapColumnLayout === "value" && "translate-x-[1.125rem]",
+                )}
+                aria-hidden
+              />
+            </button>
+            <span className="text-[10px] font-medium text-muted-foreground">Rollup</span>
+          </div>
           <Button
             type="button"
             variant="outline"
@@ -610,6 +642,36 @@ export function HeatmapFilterBar({
                 priceMax={f.priceMax}
                 onChange={(priceMin, priceMax) => patch((b) => ({ ...b, priceMin, priceMax }))}
               />
+            </section>
+            <section className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Columns</p>
+              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/25 px-3 py-2">
+                <span className="text-xs text-muted-foreground">Edition</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={f.heatmapColumnLayout === "value"}
+                  className={cn(
+                    "relative inline-flex h-7 w-11 shrink-0 items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    f.heatmapColumnLayout === "value" ? "bg-primary" : "bg-muted",
+                  )}
+                  onClick={() =>
+                    patch((b) => ({
+                      ...b,
+                      heatmapColumnLayout: b.heatmapColumnLayout === "value" ? "sets" : "value",
+                    }))
+                  }
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block size-5 translate-x-0.5 rounded-full bg-background shadow-sm ring-1 ring-border transition-transform",
+                      f.heatmapColumnLayout === "value" && "translate-x-[1.25rem]",
+                    )}
+                    aria-hidden
+                  />
+                </button>
+                <span className="text-xs text-muted-foreground">Rollup (Min / Med / Max)</span>
+              </div>
             </section>
             <section className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">Sets</p>

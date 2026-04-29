@@ -6,7 +6,7 @@ export type CellDTO = {
   tix: number | null;
   rarity: string | null;
   image_small: string | null;
-  /** Omitted from `/api/heatmap` JSON to keep payloads small; UI falls back to `image_small`. */
+  /** Higher-res art URLs when present; UI also upgrades `image_small` Scryfall CDN paths client-side. */
   image_normal?: string | null;
   image_large?: string | null;
   scryfall_uri: string | null;

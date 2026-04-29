@@ -37,6 +37,7 @@ export function HeatmapRowSortMenu({ open, onOpenChange, anchorRect, activeKey, 
           positionMethod="fixed"
         >
           <PopoverPrimitive.Popup
+            data-heatmap-row-sort-menu=""
             className={cn(
               "max-h-[min(70dvh,420px)] w-[min(calc(100vw-2rem),15rem)] overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none ring-1 ring-foreground/10",
             )}

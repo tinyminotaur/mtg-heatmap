@@ -348,6 +348,7 @@ export function HeatmapView() {
   useEffect(() => {
     return () => cancelHoverDismiss();
   }, [cancelHoverDismiss]);
+
   const [filtersRootOpen, setFiltersRootOpen] = useState(false);
   const [viewSession, setViewSession] = useState<ViewSessionMeta>({
     activeViewId: null,
@@ -797,6 +798,57 @@ export function HeatmapView() {
     return computeFloatingPreviewPosition(p.anchor, p.x, p.y);
   }, [floatingPreview]);
 
+  /** Long enough to cross the gap from the grid port to a fixed-position preview without clearing hover. */
+  const FLOATING_UI_OUTSIDE_DISMISS_MS = 380;
+
+  /** Dismiss hovers when the pointer isn’t over the grid or a floating preview (port mouseleave alone misses some exits). */
+  useEffect(() => {
+    const pinnedPreviewUp =
+      previewPinned && !isMobile && selectionCell != null && compactPreviewStyle != null;
+    const anyHover = Boolean(hover || nameRowHover || editionHeaderHover || pinnedPreviewUp);
+    if (!anyHover) return;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const onPointerMoveCapture = (e: PointerEvent) => {
+      if (e.pointerType === "touch") return;
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const inside =
+        el &&
+        (heatmapPortRef.current?.contains(el) ||
+          cardPreviewRef.current?.contains(el) ||
+          nameRowPreviewRef.current?.contains(el) ||
+          editionPreviewRef.current?.contains(el) ||
+          el.closest("[data-heatmap-row-sort-menu]"));
+      if (inside) {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+        return;
+      }
+      if (!idleTimer) {
+        idleTimer = setTimeout(() => {
+          idleTimer = null;
+          clearHoverNow();
+          if (previewPinned) setPreviewPinned(false);
+        }, FLOATING_UI_OUTSIDE_DISMISS_MS);
+      }
+    };
+    document.addEventListener("pointermove", onPointerMoveCapture, true);
+    return () => {
+      document.removeEventListener("pointermove", onPointerMoveCapture, true);
+      if (idleTimer) clearTimeout(idleTimer);
+    };
+  }, [
+    hover,
+    nameRowHover,
+    editionHeaderHover,
+    previewPinned,
+    selectionCell,
+    compactPreviewStyle,
+    isMobile,
+    clearHoverNow,
+  ]);
+
   const nameRowPreviewLayout = useMemo(() => {
     if (!nameRowHover || previewPinned || isMobile) return null;
     if (!rows[nameRowHover.row]) return null;
@@ -824,6 +876,55 @@ export function HeatmapView() {
     setDetailPayload({ row: nameRowHover.row, col: Math.max(0, col), cell });
     setCardDetailOpen(true);
   }, [nameRowHover, rows]);
+
+  const jumpToPrintingColumn = useCallback(
+    (row: number, col: number) => {
+      if (row < 0 || col < 0 || !rows[row] || col >= columns.length) return;
+      const cell = rows[row]?.cells[col] ?? null;
+      setSelR(row);
+      setSelC(col);
+      setNameRowHover(null);
+      setEditionHeaderHover(null);
+      setHover(null);
+      cancelHoverDismiss();
+      setPreviewPinned(
+        cell != null && cellEligibleForHeatmapHoverPreview(cell, heatmapMatchMode, priceMode),
+      );
+      requestAnimationFrame(() => {
+        heatmapGridRef.current?.scrollCellIntoView(row, col);
+      });
+    },
+    [rows, columns.length, heatmapMatchMode, priceMode, cancelHoverDismiss],
+  );
+
+  const nameRowPrintingsInView = useMemo(() => {
+    if (nameRowHover == null) {
+      return [] as { col: number; label: string; sub: string | null; cell: CellDTO }[];
+    }
+    const row = rows[nameRowHover.row];
+    if (!row) {
+      return [] as { col: number; label: string; sub: string | null; cell: CellDTO }[];
+    }
+    const out: { col: number; label: string; sub: string | null; cell: CellDTO }[] = [];
+    for (let c = 0; c < columns.length; c++) {
+      const cell = row.cells[c];
+      if (cell == null) continue;
+      const meta = columns[c];
+      if (!meta) continue;
+      const label = meta.name || meta.code;
+      let sub: string | null = null;
+      if (meta.set_type === "aggregate") {
+        sub = cell.source_set_name?.trim() || null;
+        if (!sub && cell.source_set_code) {
+          sub = cell.source_set_code.toUpperCase();
+        }
+      } else if (meta.code && !meta.code.startsWith("__")) {
+        sub = meta.code.toUpperCase();
+      }
+      out.push({ col: c, label, sub, cell });
+    }
+    return out;
+  }, [nameRowHover, rows, columns]);
 
   const openCardDetail = useCallback(() => {
     const p = floatingPreview;
@@ -1057,6 +1158,7 @@ export function HeatmapView() {
                 setHover({ row: r, col: c, cell, x, y, anchor });
               }}
               onLeaveGrid={clearHoverNow}
+              onLeaveInteractionPort={scheduleHoverDismiss}
               onViewportChange={bumpPinnedAnchor}
               interactionPortRef={heatmapPortRef}
               onHeaderSetClick={onHeaderSetClick}
@@ -1320,6 +1422,38 @@ export function HeatmapView() {
               >
                 {rows[nameRowHover.row]?.quick_pin_row ? "Quick-pin row ✓" : "Quick-pin this row"}
               </Button>
+            </div>
+            <div className="border-t border-border pt-2">
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Printings in view</div>
+              {nameRowPrintingsInView.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No printings in the current column scope.</p>
+              ) : (
+                <ul className="max-h-[min(200px,32vh)] space-y-0.5 overflow-y-auto overscroll-contain pr-0.5">
+                  {nameRowPrintingsInView.map(({ col, label, sub, cell }) => (
+                    <li key={col}>
+                      <button
+                        type="button"
+                        className="flex w-full items-start justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/80"
+                        onClick={() => jumpToPrintingColumn(nameRowHover.row, col)}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-foreground">{label}</span>
+                          {sub ? (
+                            <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                              {sub}
+                            </span>
+                          ) : null}
+                        </span>
+                        {cell.rarity ? (
+                          <span className="shrink-0 capitalize text-[10px] text-muted-foreground">
+                            {cell.rarity}
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>

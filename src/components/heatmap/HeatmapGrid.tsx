@@ -68,6 +68,12 @@ type Props = {
     anchor: HeatmapCellAnchorRect,
   ) => void;
   onLeaveGrid: () => void;
+  /**
+   * When the pointer exits the scroll/canvas port (e.g. toward a fixed floating preview).
+   * Defaults to `onLeaveGrid`. Use a short delayed dismiss from the parent so the cursor can
+   * cross the gap without clearing hover before it enters the preview card.
+   */
+  onLeaveInteractionPort?: () => void;
   /** Fires after scroll/resize redraw so the parent can re-read cell anchors (pinned preview). */
   onViewportChange?: () => void;
   /** Same node as the scroll port (canvas parent); used for “click outside” with pinned preview. */
@@ -183,6 +189,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     onSelectCell,
     onHoverCell,
     onLeaveGrid,
+    onLeaveInteractionPort,
     onViewportChange,
     interactionPortRef,
     onHeaderSetClick,
@@ -797,6 +804,51 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
     return () => port.removeEventListener("wheel", onWheel, { capture: true });
   }, []);
 
+  /** Touch drag on the canvas scrolls the grid (canvas sits above the overflow scroll layer). */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const scroll = scrollRef.current;
+    if (!canvas || !scroll) return;
+    let touchId: number | null = null;
+    let lastY = 0;
+    let lastX = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      touchId = t.identifier;
+      lastY = t.clientY;
+      lastX = t.clientX;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchId == null || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (t.identifier !== touchId) return;
+      const y = t.clientY;
+      const x = t.clientX;
+      scroll.scrollTop += lastY - y;
+      scroll.scrollLeft += lastX - x;
+      lastY = y;
+      lastX = x;
+      e.preventDefault();
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (touchId == null) return;
+      if (e.changedTouches.length && [...e.changedTouches].some((c) => c.identifier === touchId)) {
+        touchId = null;
+      }
+    };
+    canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd);
+    canvas.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
+
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const scrollEl = scrollRef.current;
     const canvas = canvasRef.current;
@@ -994,7 +1046,7 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
   const onPortMouseLeave = () => {
     const canvas = canvasRef.current;
     if (canvas) canvas.style.cursor = "crosshair";
-    onLeaveGrid();
+    (onLeaveInteractionPort ?? onLeaveGrid)();
   };
 
   return (

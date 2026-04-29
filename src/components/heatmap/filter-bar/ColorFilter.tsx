@@ -2,13 +2,6 @@
 
 import type { ColorMatchMode } from "@/lib/filter-state";
 import { cn } from "@/lib/utils";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 const WUBRG = ["W", "U", "B", "R", "G"] as const;
 
@@ -62,22 +55,38 @@ export function ColorFilter({ selected, onChange, mode, onModeChange }: Props) {
           );
         })}
       </div>
-      <Select
-        value={mode}
-        onValueChange={(v) => onModeChange(v === "exact" ? "exact" : "any")}
+      <div
+        className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-background/80 p-0.5"
+        role="group"
+        aria-label="Color identity match"
       >
-        <SelectTrigger
-          size="sm"
-          className="h-8 w-[5.5rem] border-0 bg-transparent px-2 text-[10px] shadow-none"
-          aria-label="Color match mode"
+        <button
+          type="button"
+          className={cn(
+            "rounded px-2 py-1 text-[10px] font-medium transition-colors",
+            mode === "any"
+              ? "bg-accent text-accent-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+          aria-pressed={mode === "any"}
+          onClick={() => onModeChange("any")}
         >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="any">Any</SelectItem>
-          <SelectItem value="exact">Exact</SelectItem>
-        </SelectContent>
-      </Select>
+          Any
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "rounded px-2 py-1 text-[10px] font-medium transition-colors",
+            mode === "exact"
+              ? "bg-accent text-accent-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+          aria-pressed={mode === "exact"}
+          onClick={() => onModeChange("exact")}
+        >
+          Exact
+        </button>
+      </div>
     </div>
   );
 }
