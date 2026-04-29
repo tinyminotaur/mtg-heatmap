@@ -139,37 +139,33 @@ function drawPriceRangeBadge(
   ctx.restore();
 }
 
-/** Pinned (row) top-left, watchlist middle-left, owned bottom-left — matches scope tab terminology. */
+/**
+ * Printing-level glyphs only (watchlist · owned). Row pin is oracle-level — shown on the name column,
+ * not repeated on every edition cell (avoids looking like each printing was pinned).
+ */
 function drawCellScopeGlyphs(
   ctx: CanvasRenderingContext2D,
   vx: number,
   vy: number,
-  row: RowDTO,
   cell: CellDTO,
   dark: boolean,
 ) {
-  const pin = "\u{1F4CC}";
   const star = "\u2605";
   const lib = "\u{1F4DA}";
+  const glyphs: { ch: string; fill: string }[] = [];
+  if (cell.watchlisted) glyphs.push({ ch: star, fill: dark ? "#93c5fd" : "#1d4ed8" });
+  if (cell.owned_qty > 0) glyphs.push({ ch: lib, fill: dark ? "#fcd34d" : "#b45309" });
+  if (glyphs.length === 0) return;
   ctx.save();
-  ctx.textAlign = "left";
-  if (row.pinned) {
-    ctx.font = "11px system-ui, sans-serif";
-    ctx.fillStyle = dark ? "#e9d5ff" : "#7e22ce";
-    ctx.textBaseline = "top";
-    ctx.fillText(pin, vx + 3, vy + 3);
-  }
-  if (cell.watchlisted) {
-    ctx.font = "12px system-ui, sans-serif";
-    ctx.fillStyle = dark ? "#93c5fd" : "#1d4ed8";
-    ctx.textBaseline = "middle";
-    ctx.fillText(star, vx + 4, vy + HEATMAP_ROW_HEIGHT / 2);
-  }
-  if (cell.owned_qty > 0) {
-    ctx.font = "11px system-ui, sans-serif";
-    ctx.fillStyle = dark ? "#fcd34d" : "#b45309";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(lib, vx + 3, vy + HEATMAP_ROW_HEIGHT - 3);
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  const cy = vy + HEATMAP_ROW_HEIGHT / 2;
+  const step = 10;
+  const x0 = vx + 3 + step / 2;
+  ctx.font = "9px system-ui, sans-serif";
+  for (let i = 0; i < glyphs.length; i++) {
+    ctx.fillStyle = glyphs[i].fill;
+    ctx.fillText(glyphs[i].ch, x0 + i * step, cy);
   }
   ctx.restore();
 }
@@ -181,10 +177,12 @@ function drawCellPriceLabel(
   text: string,
   dark: boolean,
   emphasis: boolean,
+  /** Space reserved on the left for scope glyphs (watchlist/owned). */
+  leftGlyphReserve = 0,
 ) {
   /** Bottom-right; Min/Max badges use top-right. */
   const pad = 3;
-  const maxW = HEATMAP_COL_WIDTH - pad * 2;
+  const maxW = Math.max(12, HEATMAP_COL_WIDTH - pad * 2 - leftGlyphReserve);
   const rightX = vx + HEATMAP_COL_WIDTH - pad;
   const bottomY = vy + HEATMAP_ROW_HEIGHT - pad;
   ctx.save();
@@ -398,23 +396,22 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
             ctx.fillStyle = dark ? "rgba(14, 165, 233, 0.22)" : "rgba(125, 211, 252, 0.28)";
             ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
           }
-          if (row.pinned) {
-            ctx.fillStyle = dark ? "rgba(168, 85, 247, 0.22)" : "rgba(147, 51, 234, 0.16)";
-            ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
-          }
         }
         if (contextDim) {
           ctx.fillStyle = dark ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.5)";
           ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
         }
         if (cell && !strictHide) {
-          drawCellScopeGlyphs(ctx, vx, vy, row, cell, dark);
+          drawCellScopeGlyphs(ctx, vx, vy, cell, dark);
           const badges: { label: string; variant: "low" | "high" }[] = [];
           if (row.price_low_cols.includes(c)) badges.push({ label: "Min", variant: "low" });
           if (row.price_high_cols.includes(c)) badges.push({ label: "Max", variant: "high" });
           badges.forEach((b, i) => drawPriceRangeBadge(ctx, vx, vy, b.label, b.variant, dark, i));
           const priceLabel = formatHeatmapCellPriceLabel(cell, priceMode);
-          drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null);
+          const glyphN =
+            (cell.watchlisted ? 1 : 0) + (cell.owned_qty > 0 ? 1 : 0);
+          const leftGlyphReserve = glyphN === 0 ? 0 : glyphN === 1 ? 15 : 26;
+          drawCellPriceLabel(ctx, vx, vy, priceLabel ?? "—", dark, priceLabel != null, leftGlyphReserve);
         }
       }
     }
