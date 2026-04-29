@@ -222,6 +222,22 @@ function drawCellPriceLabel(
   ctx.restore();
 }
 
+function drawCellCenterMark(
+  ctx: CanvasRenderingContext2D,
+  vx: number,
+  vy: number,
+  text: string,
+  dark: boolean,
+) {
+  ctx.save();
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.font = `600 14px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.fillStyle = dark ? "rgba(156,163,175,0.92)" : "rgba(82,82,91,0.92)";
+  ctx.fillText(text, vx + HEATMAP_COL_WIDTH / 2, vy + HEATMAP_ROW_HEIGHT / 2);
+  ctx.restore();
+}
+
 /** Viewport-sized canvas + off-screen scroll spacer so large grids stay GPU-friendly. */
 export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function HeatmapGrid(
   {
@@ -422,6 +438,13 @@ export const HeatmapGrid = forwardRef<HeatmapGridHandle, Props>(function Heatmap
         if (contextDim) {
           ctx.fillStyle = dark ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.5)";
           ctx.fillRect(vx + 0.5, vy + 0.5, HEATMAP_COL_WIDTH - 1, HEATMAP_ROW_HEIGHT - 1);
+        }
+        if (!cell) {
+          // No printing exists for this oracle_id in this set column.
+          drawCellCenterMark(ctx, vx, vy, "·", dark);
+        } else if (strictHide) {
+          // Printing exists, but strict filter excludes it.
+          drawCellCenterMark(ctx, vx, vy, "⦸", dark);
         }
         if (cell && !strictHide) {
           drawCellScopeGlyphs(ctx, vx, vy, cell, dark);

@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 type Props = {
   value: string;
   onChange: (value: string) => void;
+  includeText?: boolean;
+  onIncludeTextChange?: (next: boolean) => void;
   placeholder?: string;
   debounceMs?: number;
   className?: string;
@@ -16,6 +18,8 @@ type Props = {
 export function FilterSearch({
   value,
   onChange,
+  includeText = false,
+  onIncludeTextChange,
   placeholder = "Search cards…",
   debounceMs = 150,
   className,
@@ -57,12 +61,15 @@ export function FilterSearch({
   };
 
   return (
-    <div className={cn("relative min-w-[200px] max-w-[min(100%,280px)] flex-1", className)}>
+    <div className={cn("relative min-w-[200px] max-w-[min(100%,360px)] flex-1", className)}>
       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
       <Input
         id="heatmap-search"
         value={local}
-        className="h-9 border-border/80 bg-muted/30 pl-8 pr-8 text-xs focus-visible:ring-1"
+        className={cn(
+          "h-9 border-border/80 bg-muted/30 pl-8 text-xs focus-visible:ring-1",
+          onIncludeTextChange ? "pr-[4.25rem]" : "pr-8",
+        )}
         placeholder={placeholder}
         aria-label="Search cards"
         onChange={(e) => schedule(e.target.value)}
@@ -81,6 +88,23 @@ export function FilterSearch({
           }
         }}
       />
+      {onIncludeTextChange ? (
+        <button
+          type="button"
+          className={cn(
+            "absolute right-7 top-1/2 -translate-y-1/2 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+            includeText
+              ? "border-border bg-background text-foreground shadow-sm"
+              : "border-border/70 bg-muted/40 text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+          aria-pressed={includeText}
+          aria-label={includeText ? "Searching name + text" : "Searching name only"}
+          title={includeText ? "Searching name + oracle text (rules/reminder)" : "Searching name only"}
+          onClick={() => onIncludeTextChange(!includeText)}
+        >
+          Text
+        </button>
+      ) : null}
       {local ? (
         <button
           type="button"

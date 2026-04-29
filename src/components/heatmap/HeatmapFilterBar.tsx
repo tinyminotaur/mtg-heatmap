@@ -435,6 +435,8 @@ export function HeatmapFilterBar(props: Props) {
                 className="max-w-none"
                 value={f.search}
                 onChange={(v) => patch((b) => ({ ...b, search: v }))}
+                includeText={f.searchInText}
+                onIncludeTextChange={(searchInText) => patch((b) => ({ ...b, searchInText }))}
               />
               <div className="grid grid-cols-2 gap-2">
                 <SetsPicker
@@ -571,6 +573,8 @@ export function HeatmapFilterBar(props: Props) {
             className="min-w-0 flex-1"
             value={f.search}
             onChange={(v) => patch((b) => ({ ...b, search: v }))}
+            includeText={f.searchInText}
+            onIncludeTextChange={(searchInText) => patch((b) => ({ ...b, searchInText }))}
           />
           <Button
             type="button"

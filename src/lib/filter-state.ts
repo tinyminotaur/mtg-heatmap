@@ -49,6 +49,8 @@ export type HeatmapFilters = {
   includeDigital: boolean;
   specialGroup: string | null;
   search: string;
+  /** When true, search includes oracle_text (rules/reminder text); default is name-only. */
+  searchInText: boolean;
   /**
    * Primary row sort key (legacy URL `sort`); value keys are price_min | price_max | price_median.
    * Direction lives on sortSlots[0].dir for value sorts.
@@ -114,6 +116,7 @@ export type FilterState = {
     includeDigital: boolean;
     specialGroup: string | null;
     search: string;
+    searchInText: boolean;
     /** Session quick-pins (see HeatmapFilters.quickPinRows). */
     quickPinRows: string[];
     quickPinCols: string[];
@@ -164,6 +167,7 @@ export const defaultHeatmapFilters: HeatmapFilters = {
   includeDigital: false,
   specialGroup: null,
   search: "",
+  searchInText: false,
   sort: "name",
   sortSlots: [{ key: "name", dir: null }],
   valueAggScope: "visible",
@@ -209,6 +213,7 @@ export const DEFAULT_FILTER_STATE: FilterState = {
     includeDigital: false,
     specialGroup: null,
     search: "",
+    searchInText: false,
     quickPinRows: [],
     quickPinCols: [],
   },

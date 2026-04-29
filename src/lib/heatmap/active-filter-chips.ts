@@ -40,7 +40,7 @@ export function buildActiveFilterChips(f: HeatmapFilters): ActiveFilterChip[] {
   if (f.search.trim()) {
     out.push({
       id: "q",
-      label: `Search: ${f.search.trim()}`,
+      label: `Search: ${f.search.trim()}${f.searchInText ? " (text)" : ""}`,
       kind: "search",
     });
   }

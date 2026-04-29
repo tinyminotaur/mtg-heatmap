@@ -176,6 +176,8 @@ type PrintingRow = {
   oracle_id: string;
   set_code: string;
   scryfall_id: string;
+  collector_number?: string | null;
+  released_at?: string | null;
   usd: number | null;
   usd_foil: number | null;
   eur: number | null;
@@ -187,6 +189,9 @@ type PrintingRow = {
   scryfall_uri: string | null;
   tcgplayer_url: string | null;
   cardmarket_url: string | null;
+  is_promo?: number | null;
+  is_foil_only?: number | null;
+  is_nonfoil_only?: number | null;
 };
 
 function valueLayoutColumnMetas(): ColumnMeta[] {
@@ -435,12 +440,30 @@ export async function getHeatmapData(
     LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
     WHERE p.oracle_id IN (${inList})
       AND p.set_code IN (${physicalSetCodes.map(() => "?").join(",")})
+    ORDER BY p.oracle_id, p.set_code COLLATE NOCASE,
+      COALESCE(p.is_promo, 0) ASC,
+      COALESCE(p.is_foil_only, 0) ASC,
+      COALESCE(p.is_nonfoil_only, 0) ASC,
+      (CASE WHEN p.released_at IS NULL OR p.released_at = '' THEN 1 ELSE 0 END) ASC,
+      p.released_at ASC,
+      (CASE WHEN p.collector_number IS NULL OR p.collector_number = '' THEN 1 ELSE 0 END) ASC,
+      LENGTH(p.collector_number) ASC,
+      p.collector_number COLLATE NOCASE ASC
   `
     : `
     SELECT p.*, pc.usd, pc.usd_foil, pc.eur, pc.tix
     FROM printings p
     LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
     WHERE p.oracle_id IN (${inList})
+    ORDER BY p.oracle_id, p.set_code COLLATE NOCASE,
+      COALESCE(p.is_promo, 0) ASC,
+      COALESCE(p.is_foil_only, 0) ASC,
+      COALESCE(p.is_nonfoil_only, 0) ASC,
+      (CASE WHEN p.released_at IS NULL OR p.released_at = '' THEN 1 ELSE 0 END) ASC,
+      p.released_at ASC,
+      (CASE WHEN p.collector_number IS NULL OR p.collector_number = '' THEN 1 ELSE 0 END) ASC,
+      LENGTH(p.collector_number) ASC,
+      p.collector_number COLLATE NOCASE ASC
   `;
   const printingRows = db
     .prepare(printSql)
@@ -449,7 +472,32 @@ export async function getHeatmapData(
   const byOracle = new Map<string, Map<string, PrintingRow>>();
   for (const pr of printingRows) {
     if (!byOracle.has(pr.oracle_id)) byOracle.set(pr.oracle_id, new Map());
-    byOracle.get(pr.oracle_id)!.set(pr.set_code, pr);
+    // Some sets have multiple printings (promos/variants). Pick a stable "best" printing per set_code
+    // so cell metadata (image/links/prices) doesn't randomly flip depending on query order.
+    const pmap = byOracle.get(pr.oracle_id)!;
+    if (!pmap.has(pr.set_code)) {
+      pmap.set(pr.set_code, pr);
+      continue;
+    }
+    const cur = pmap.get(pr.set_code)!;
+    const curPromo = Number(cur.is_promo ?? 0);
+    const nextPromo = Number(pr.is_promo ?? 0);
+    if (curPromo !== nextPromo && nextPromo < curPromo) {
+      pmap.set(pr.set_code, pr);
+      continue;
+    }
+    const curFoilOnly = Number(cur.is_foil_only ?? 0);
+    const nextFoilOnly = Number(pr.is_foil_only ?? 0);
+    if (curFoilOnly !== nextFoilOnly && nextFoilOnly < curFoilOnly) {
+      pmap.set(pr.set_code, pr);
+      continue;
+    }
+    const curNonfoilOnly = Number(cur.is_nonfoil_only ?? 0);
+    const nextNonfoilOnly = Number(pr.is_nonfoil_only ?? 0);
+    if (curNonfoilOnly !== nextNonfoilOnly && nextNonfoilOnly < curNonfoilOnly) {
+      pmap.set(pr.set_code, pr);
+      continue;
+    }
   }
 
   // Owned / watchlist / pinned are stored in Postgres; derive per-printing and per-oracle state here.

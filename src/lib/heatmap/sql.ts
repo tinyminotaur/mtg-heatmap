@@ -45,10 +45,13 @@ export function cardWhereClause(f: HeatmapFilters): { sql: string; params: unkno
   const q = f.search.trim();
   if (q.length >= 2) {
     const term = `%${q}%`;
-    parts.push(
-      "(c.name LIKE ? OR COALESCE(c.type_line, '') LIKE ? OR COALESCE(c.oracle_text, '') LIKE ?)",
-    );
-    params.push(term, term, term);
+    if (f.searchInText) {
+      parts.push("(c.name LIKE ? OR COALESCE(c.oracle_text, '') LIKE ?)");
+      params.push(term, term);
+    } else {
+      parts.push("(c.name LIKE ?)");
+      params.push(term);
+    }
   }
   const lane = colorLaneWhereClause(f);
   if (lane) {

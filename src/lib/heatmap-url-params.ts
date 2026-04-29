@@ -206,6 +206,7 @@ export function parseHeatmapUrlSearchParams(sp: URLSearchParams): HeatmapFilters
     includeDigital: merged.get("digital") === "1",
     specialGroup: merged.get("group") || null,
     search: merged.get("q") ?? "",
+    searchInText: merged.get("qt") === "1",
     sort: slotsToPrimarySortString(sortSlots),
     sortSlots,
     valueAggScope: merged.get("vscope") === "all" ? "all" : "visible",
@@ -282,7 +283,10 @@ export function serializeHeatmapUrlParams(f: HeatmapFilters): URLSearchParams {
   if (f.reservedOnly === false) out.set("reserved", "0");
   if (f.includeDigital) out.set("digital", "1");
   if (f.specialGroup) out.set("group", f.specialGroup);
-  if (f.search.trim()) out.set("q", f.search.trim());
+  // Preserve whitespace exactly as typed in the URL so the input doesn't "eat" spaces while loading.
+  // Server-side query logic already normalizes with `.trim()` when executing the search.
+  if (f.search.trim()) out.set("q", f.search);
+  if (f.searchInText) out.set("qt", "1");
   if (f.colSort !== "release") out.set("colSort", f.colSort);
   if (f.page > 0) out.set("page", String(f.page));
   if (f.pageSize !== HEATMAP_MAX_PAGE_SIZE) out.set("pageSize", String(f.pageSize));
