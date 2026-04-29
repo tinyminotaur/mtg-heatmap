@@ -5,6 +5,7 @@ import { useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -59,74 +60,76 @@ export function ViewsSelector({
         <ChevronDown className="size-3.5 shrink-0 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Saved views</DropdownMenuLabel>
-        {savedViews.map((v) => (
-          <div key={v.id} className="group relative">
-            {renamingId === v.id ? (
-              <div className="flex gap-1 px-2 py-1">
-                <Input
-                  className="h-8 text-xs"
-                  value={renameDraft}
-                  onChange={(e) => setRenameDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      onRenameView(v.id, renameDraft.trim() || v.name);
-                      setRenamingId(null);
-                    }
-                    if (e.key === "Escape") setRenamingId(null);
-                  }}
-                  autoFocus
-                />
-              </div>
-            ) : (
-              <DropdownMenuItem
-                className="flex items-center justify-between gap-2 pr-8"
-                onClick={() => onSelectView(v)}
-              >
-                <span className="flex min-w-0 items-center gap-1.5">
-                  {activeViewId === v.id ? (
-                    <Check className="size-3.5 shrink-0 text-primary" />
-                  ) : (
-                    <span className="size-3.5 shrink-0" />
-                  )}
-                  <span className="truncate">{v.name}</span>
-                  {v.isDefault ? (
-                    <span className="text-[10px] text-muted-foreground">(default)</span>
-                  ) : null}
-                </span>
-                {!v.builtIn ? (
-                  <span className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button
-                      type="button"
-                      className="rounded p-1 hover:bg-muted"
-                      aria-label={`Rename ${v.name}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setRenamingId(v.id);
-                        setRenameDraft(v.name);
-                      }}
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded p-1 hover:bg-muted"
-                      aria-label={`Delete ${v.name}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onDeleteView(v.id);
-                      }}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Saved views</DropdownMenuLabel>
+          {savedViews.map((v) => (
+            <div key={v.id} className="group relative">
+              {renamingId === v.id ? (
+                <div className="flex gap-1 px-2 py-1">
+                  <Input
+                    className="h-8 text-xs"
+                    value={renameDraft}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        onRenameView(v.id, renameDraft.trim() || v.name);
+                        setRenamingId(null);
+                      }
+                      if (e.key === "Escape") setRenamingId(null);
+                    }}
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <DropdownMenuItem
+                  className="flex items-center justify-between gap-2 pr-8"
+                  onClick={() => onSelectView(v)}
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {activeViewId === v.id ? (
+                      <Check className="size-3.5 shrink-0 text-primary" />
+                    ) : (
+                      <span className="size-3.5 shrink-0" />
+                    )}
+                    <span className="truncate">{v.name}</span>
+                    {v.isDefault ? (
+                      <span className="text-[10px] text-muted-foreground">(default)</span>
+                    ) : null}
                   </span>
-                ) : null}
-              </DropdownMenuItem>
-            )}
-          </div>
-        ))}
+                  {!v.builtIn ? (
+                    <span className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        type="button"
+                        className="rounded p-1 hover:bg-muted"
+                        aria-label={`Rename ${v.name}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setRenamingId(v.id);
+                          setRenameDraft(v.name);
+                        }}
+                      >
+                        <Pencil className="size-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-1 hover:bg-muted"
+                        aria-label={`Delete ${v.name}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDeleteView(v.id);
+                        }}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </span>
+                  ) : null}
+                </DropdownMenuItem>
+              )}
+            </div>
+          ))}
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onSaveCurrentView}>+ Save current view…</DropdownMenuItem>
       </DropdownMenuContent>
