@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
-import { Filter, MoreHorizontal, SlidersHorizontal } from "lucide-react";
+import { Filter, MoreHorizontal, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -474,73 +474,79 @@ export function HeatmapFilterBar(props: Props) {
                 />
               </div>
 
-              {/* 3 rows total, equal-ish height to mana selector */}
-              <div
-                className="grid shrink-0 grid-cols-4 gap-1 pt-[2px]"
-                style={{ gridAutoRows: "1.5rem" }}
-              >
-                {RARITY_PILLS.map((r) => {
-                  const on = f.rarity.includes(r);
-                  return (
-                    <button
-                      key={r}
-                      type="button"
-                      aria-pressed={on}
-                      className={cn(
-                        "inline-flex h-6 w-[7.25rem] items-center justify-center rounded-full border px-2 text-xs font-semibold capitalize tracking-wide transition-colors",
-                        on ? RARITY_PILL_ON[r] : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60",
-                      )}
-                      onClick={() =>
-                        patch((b) => {
-                          const s = new Set(b.rarity);
-                          if (s.has(r)) s.delete(r);
-                          else s.add(r);
-                          return { ...b, rarity: [...s].sort() };
-                        })
-                      }
-                    >
-                      {r}
-                    </button>
-                  );
-                })}
+              {/* Rarity + Type groups (keep them visually separate) */}
+              <div className="flex min-w-0 flex-wrap items-start gap-2 pt-[2px]">
+                <div className="grid shrink-0 grid-cols-2 gap-1">
+                  {RARITY_PILLS.map((r) => {
+                    const on = f.rarity.includes(r);
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        aria-pressed={on}
+                        className={cn(
+                          // Fit the longest rarity label; keep pills equal width within the group.
+                          "inline-flex h-6 w-[6.5rem] items-center justify-center rounded-full border px-2 text-xs font-semibold capitalize tracking-wide transition-colors",
+                          on
+                            ? RARITY_PILL_ON[r]
+                            : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60",
+                        )}
+                        onClick={() =>
+                          patch((b) => {
+                            const s = new Set(b.rarity);
+                            if (s.has(r)) s.delete(r);
+                            else s.add(r);
+                            return { ...b, rarity: [...s].sort() };
+                          })
+                        }
+                      >
+                        {r}
+                      </button>
+                    );
+                  })}
+                </div>
 
-                {TYPE_PILLS.map((t) => {
-                  const on = f.types.includes(t);
-                  const glyph = typePillGlyph(t);
-                  const label = t.slice(0, 1).toUpperCase() + t.slice(1);
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      aria-pressed={on}
-                      className={cn(
-                        "inline-flex h-6 w-[7.25rem] items-center justify-center gap-1.5 rounded-full border px-2 text-xs font-semibold transition-colors",
-                        on
-                          ? "border-border bg-background text-foreground shadow-sm"
-                          : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60",
-                      )}
-                      onClick={() => toggleType(t)}
-                    >
-                      {glyph ? (
-                        <span aria-hidden style={{ fontFamily: "Mana", fontSize: 13, lineHeight: 1 }}>
-                          {glyph}
-                        </span>
-                      ) : null}
-                      <span>{label}</span>
-                    </button>
-                  );
-                })}
+                <div className="grid shrink-0 grid-cols-2 gap-1">
+                  {TYPE_PILLS.map((t) => {
+                    const on = f.types.includes(t);
+                    const glyph = typePillGlyph(t);
+                    const label = t.slice(0, 1).toUpperCase() + t.slice(1);
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        aria-pressed={on}
+                        className={cn(
+                          // Fit the longest type label ("Enchantment"); equal width within group.
+                          "inline-flex h-6 w-[7.75rem] items-center justify-center gap-1.5 rounded-full border px-2 text-xs font-semibold transition-colors",
+                          on
+                            ? "border-border bg-background text-foreground shadow-sm"
+                            : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60",
+                        )}
+                        onClick={() => toggleType(t)}
+                      >
+                        {glyph ? (
+                          <span aria-hidden style={{ fontFamily: "Mana", fontSize: 13, lineHeight: 1 }}>
+                            {glyph}
+                          </span>
+                        ) : null}
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
+              {/* Advanced (icon-only, never overflow) */}
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
-                className="h-9 shrink-0 gap-1 self-start text-xs"
+                size="icon"
+                className="size-9 shrink-0 self-start"
+                aria-label="Advanced filters"
                 onClick={() => onFiltersRootOpenChange(!filtersRootOpen)}
               >
-                <SlidersHorizontal className="size-3.5" />
-                Advanced
+                <Settings className="size-4" />
               </Button>
             </div>
 
