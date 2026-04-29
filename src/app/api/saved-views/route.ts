@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { LOCAL_USER_ID } from "@/lib/constants";
 import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
+import { requireUserId } from "@/lib/require-user";
+import { createSavedView, listSavedViews, userDbEnabled } from "@/lib/userdb";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +22,11 @@ function canonicalizeQuery(raw: string): string {
 }
 
 export async function GET() {
+  const userId = await requireUserId();
+  if (userDbEnabled()) {
+    const rows = await listSavedViews(userId);
+    return NextResponse.json(rows.map((r) => ({ id: r.id, name: r.name, query: r.filter_state, created_at: r.created_at })));
+  }
   const db = getDb();
   const rows = db
     .prepare(
@@ -29,7 +35,7 @@ export async function GET() {
        WHERE user_id = ?
        ORDER BY created_at DESC, name COLLATE NOCASE ASC`,
     )
-    .all(LOCAL_USER_ID) as SavedViewDTO[];
+    .all(userId) as SavedViewDTO[];
   return NextResponse.json(rows);
 }
 
@@ -41,11 +47,16 @@ export async function POST(req: NextRequest) {
     const canonical = canonicalizeQuery(query);
 
     const id = crypto.randomUUID();
+    const userId = await requireUserId();
+    if (userDbEnabled()) {
+      await createSavedView({ userId, id, name, filter_state: canonical });
+      return NextResponse.json({ id, name, query: canonical }, { status: 201 });
+    }
     const db = getDb();
     db.prepare(
       `INSERT INTO saved_views (id, user_id, name, filter_state, created_at)
        VALUES (?, ?, ?, ?, datetime('now'))`,
-    ).run(id, LOCAL_USER_ID, name, canonical);
+    ).run(id, userId, name, canonical);
 
     return NextResponse.json({ id, name, query: canonical }, { status: 201 });
   } catch (e) {

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { LOCAL_USER_ID } from "@/lib/constants";
 import { parseHeatmapUrlSearchParams, serializeHeatmapUrlParams } from "@/lib/heatmap-url-params";
+import { requireUserId } from "@/lib/require-user";
+import { deleteSavedView, getSavedView, updateSavedView, userDbEnabled } from "@/lib/userdb";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,6 +16,12 @@ function canonicalizeQuery(raw: string): string {
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const userId = await requireUserId();
+  if (userDbEnabled()) {
+    const row = await getSavedView({ userId, id });
+    if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return NextResponse.json({ id: row.id, name: row.name, query: row.filter_state, created_at: row.created_at });
+  }
   const db = getDb();
   const row = db
     .prepare(
@@ -22,7 +29,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
        FROM saved_views
        WHERE user_id = ? AND id = ?`,
     )
-    .get(LOCAL_USER_ID, id) as
+    .get(userId, id) as
     | { id: string; name: string | null; query: string; created_at: string | null }
     | undefined;
   if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
@@ -48,11 +55,15 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
     if (!fields.length) return NextResponse.json({ ok: true });
 
-    vals.push(LOCAL_USER_ID, id);
+    const userId = await requireUserId();
+    if (userDbEnabled()) {
+      const ok = await updateSavedView({ userId, id, name: body.name !== undefined ? name : undefined, filter_state: body.query !== undefined ? (query ?? "") : undefined });
+      if (!ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
+      return NextResponse.json({ ok: true });
+    }
+    vals.push(userId, id);
     const db = getDb();
-    const res = db
-      .prepare(`UPDATE saved_views SET ${fields.join(", ")} WHERE user_id = ? AND id = ?`)
-      .run(...vals);
+    const res = db.prepare(`UPDATE saved_views SET ${fields.join(", ")} WHERE user_id = ? AND id = ?`).run(...vals);
     if (res.changes === 0) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json({ ok: true });
   } catch (e) {
@@ -64,8 +75,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const userId = await requireUserId();
+  if (userDbEnabled()) {
+    const ok = await deleteSavedView({ userId, id });
+    if (!ok) return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return NextResponse.json({ ok: true });
+  }
   const db = getDb();
-  const res = db.prepare(`DELETE FROM saved_views WHERE user_id = ? AND id = ?`).run(LOCAL_USER_ID, id);
+  const res = db.prepare(`DELETE FROM saved_views WHERE user_id = ? AND id = ?`).run(userId, id);
   if (res.changes === 0) return NextResponse.json({ error: "not_found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

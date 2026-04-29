@@ -14,7 +14,9 @@ import {
 } from "@/components/ui/select";
 import { resolveSetIconSvgUrl } from "@/lib/set-icon-url";
 import { cn } from "@/lib/utils";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   HEATMAP_FROZEN_COL_W,
@@ -56,7 +58,7 @@ import { primarySortButtonLabel } from "@/lib/heatmap/sort-display";
 import { buildSoloEditionViewFilters } from "@/lib/heatmap/solo-edition-view";
 import { OwnedListPanel } from "@/components/owned/OwnedListPanel";
 import { WatchlistListPanel } from "@/components/watchlist/WatchlistListPanel";
-import { Library, Maximize2, Palette, Search, Star, X } from "lucide-react";
+import { Library, Maximize2, Palette, Search, Star, User, X } from "lucide-react";
 import type { PortfolioSummary } from "@/lib/portfolio-summary";
 import type { SortingState, VisibilityState } from "@tanstack/react-table";
 
@@ -347,6 +349,45 @@ export function HeatmapView() {
     },
     staleTime: 10_000,
   });
+
+  const { data: me } = useQuery<{ ok: boolean; user: { id: string; handle: string | null; is_guest: boolean } | null }>(
+    {
+      queryKey: ["me"],
+      queryFn: () => fetchJson(`/api/auth/me`),
+      staleTime: 30_000,
+    },
+  );
+
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
+  const [authHandle, setAuthHandle] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authErr, setAuthErr] = useState<string | null>(null);
+
+  const authSubmit = useCallback(async () => {
+    setAuthErr(null);
+    const route = authMode === "login" ? "/api/auth/login" : "/api/auth/signup";
+    const res = await fetch(route, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ handle: authHandle, password: authPassword }),
+    });
+    if (!res.ok) {
+      setAuthErr("Login/signup failed.");
+      return;
+    }
+    setAuthOpen(false);
+    setAuthPassword("");
+    await qc.invalidateQueries({ queryKey: ["me"] });
+    await invalidateAfterCollectionChange();
+  }, [authMode, authHandle, authPassword, qc, invalidateAfterCollectionChange]);
+
+  const authLogout = useCallback(async () => {
+    setAuthErr(null);
+    await fetch("/api/auth/logout", { method: "POST" });
+    await qc.invalidateQueries({ queryKey: ["me"] });
+    await invalidateAfterCollectionChange();
+  }, [qc, invalidateAfterCollectionChange]);
 
   const { data: statusData } = useQuery<StatusResponse>({
     queryKey: ["heatmap-status"],
@@ -1377,6 +1418,20 @@ export function HeatmapView() {
             <Palette className="size-4 shrink-0 text-amber-200/90" aria-hidden />
             <span>Legend</span>
           </button>
+          <button
+            type="button"
+            className="header-toolbar-action cursor-pointer inline-flex items-start gap-2 py-2 text-left"
+            onClick={() => setAuthOpen(true)}
+            title="Account"
+          >
+            <User className="size-4 shrink-0 text-amber-200/90 mt-0.5" aria-hidden />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="font-medium leading-none">Account</span>
+              <span className="font-mono text-xs leading-tight text-amber-100/90 tabular-nums">
+                {me?.user?.handle ? me.user.handle : me?.user?.is_guest ? "Guest" : "—"}
+              </span>
+            </span>
+          </button>
           <button type="button" className="header-toolbar-action cursor-pointer" onClick={() => setCmdOpen(true)}>
             <Search className="size-4 shrink-0 text-amber-200/90" aria-hidden />
             <span className="inline-flex flex-wrap items-baseline gap-x-1 gap-y-0">
@@ -1389,6 +1444,70 @@ export function HeatmapView() {
         </nav>
       </div>
       </header>
+
+      <Dialog open={authOpen} onOpenChange={setAuthOpen}>
+        <DialogContent showCloseButton className="max-w-[min(96vw,28rem)]">
+          <DialogHeader>
+            <DialogTitle>Account</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={authMode === "signup" ? "secondary" : "outline"}
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setAuthMode("signup")}
+              >
+                Create / upgrade
+              </Button>
+              <Button
+                type="button"
+                variant={authMode === "login" ? "secondary" : "outline"}
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setAuthMode("login")}
+              >
+                Log in
+              </Button>
+              <div className="flex-1" />
+              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={authLogout}>
+                Log out
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Handle</Label>
+                <Input
+                  className="h-9 text-xs"
+                  value={authHandle}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAuthHandle(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Password</Label>
+                <Input
+                  className="h-9 text-xs"
+                  type="password"
+                  value={authPassword}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAuthPassword(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {authErr ? <p className="text-xs text-destructive">{authErr}</p> : null}
+
+            <Button type="button" className="h-9 w-full text-xs" onClick={authSubmit}>
+              {authMode === "login" ? "Log in" : "Create account"}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Guest mode saves to this browser. Creating an account lets you sync pins, owned cards, watchlist, and saved
+              views across devices.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <HeatmapFilterBar
         queryString={queryString}

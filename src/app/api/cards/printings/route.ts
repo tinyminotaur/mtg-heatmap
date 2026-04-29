@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { LOCAL_USER_ID } from "@/lib/constants";
 import { getDb } from "@/lib/db";
+import { requireUserId } from "@/lib/require-user";
+import { listOwnedScryfallIds, listWatchlistScryfallIds, userDbEnabled } from "@/lib/userdb";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export type CardPrintingApiRow = {
   scryfall_id: string;
@@ -25,20 +27,18 @@ export async function GET(req: NextRequest) {
   const exists = db.prepare(`SELECT 1 FROM cards WHERE oracle_id = ?`).get(oracleId);
   if (!exists) return NextResponse.json({ printings: [] as CardPrintingApiRow[] });
 
-  const userId = LOCAL_USER_ID;
+  const userId = await requireUserId();
   const rows = db
     .prepare(
       `SELECT p.scryfall_id, p.set_code, p.rarity, p.released_at, p.collector_number,
-              s.name AS set_name, s.release_date AS set_release,
-              (SELECT COUNT(*) FROM owned_cards o WHERE o.user_id = ? AND o.scryfall_id = p.scryfall_id) AS owned_qty,
-              EXISTS(SELECT 1 FROM watchlist w WHERE w.user_id = ? AND w.scryfall_id = p.scryfall_id) AS watchlisted
+              s.name AS set_name, s.release_date AS set_release
        FROM printings p
        JOIN sets s ON s.code = p.set_code
        WHERE p.oracle_id = ?
        ORDER BY COALESCE(p.released_at, s.release_date, '') ASC, LOWER(s.name) ASC
        LIMIT 350`,
     )
-    .all(userId, userId, oracleId) as {
+    .all(oracleId) as {
     scryfall_id: string;
     set_code: string;
     rarity: string | null;
@@ -46,9 +46,29 @@ export async function GET(req: NextRequest) {
     collector_number: string | null;
     set_name: string;
     set_release: string | null;
-    owned_qty: number;
-    watchlisted: number;
   }[];
+
+  let ownedCount = new Map<string, number>();
+  let watchSet = new Set<string>();
+  if (userDbEnabled()) {
+    const [ownedSids, wlSids] = await Promise.all([
+      listOwnedScryfallIds(userId),
+      listWatchlistScryfallIds(userId),
+    ]);
+    for (const sid of ownedSids) ownedCount.set(sid, (ownedCount.get(sid) ?? 0) + 1);
+    watchSet = new Set(wlSids);
+  } else {
+    // SQLite fallback.
+    const ownedRows = db
+      .prepare(`SELECT scryfall_id, COUNT(*) AS n FROM owned_cards WHERE user_id = ? GROUP BY scryfall_id`)
+      .all(userId) as { scryfall_id: string; n: number }[];
+    ownedCount = new Map(ownedRows.map((r) => [r.scryfall_id, r.n]));
+    watchSet = new Set(
+      (db.prepare(`SELECT scryfall_id FROM watchlist WHERE user_id = ?`).all(userId) as { scryfall_id: string }[]).map(
+        (r) => r.scryfall_id,
+      ),
+    );
+  }
 
   const printings: CardPrintingApiRow[] = rows.map((r) => ({
     scryfall_id: r.scryfall_id,
@@ -58,8 +78,8 @@ export async function GET(req: NextRequest) {
     released_at: r.released_at,
     collector_number: r.collector_number,
     set_release: r.set_release,
-    owned_qty: r.owned_qty,
-    watchlisted: r.watchlisted === 1,
+    owned_qty: ownedCount.get(r.scryfall_id) ?? 0,
+    watchlisted: watchSet.has(r.scryfall_id),
   }));
 
   return NextResponse.json({ printings });

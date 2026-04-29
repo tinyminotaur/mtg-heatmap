@@ -10,8 +10,8 @@
  */
 
 import type Database from "better-sqlite3";
-import { LOCAL_USER_ID } from "@/lib/constants";
 import type { HeatmapFilters } from "@/lib/filter-state";
+import { getPinnedOracleIds, listOwnedScryfallIds, listWatchlistScryfallIds, userDbEnabled } from "@/lib/userdb";
 import { resolveHeatmapColumns } from "./heatmap-column-resolve";
 import { parseHeatmapUrlSearchParams, type CellPriceField } from "@/lib/heatmap-url-params";
 import type { ColumnMeta } from "@/lib/heatmap-types";
@@ -221,15 +221,59 @@ function valueLayoutColumnMetas(): ColumnMeta[] {
   ];
 }
 
-export function getHeatmapData(
+export async function getHeatmapData(
   db: Database.Database,
   f: HeatmapFilters,
-): { columns: ColumnMeta[]; rows: RowDTO[]; total: number } {
-  const userId = LOCAL_USER_ID;
+  userId: string,
+): Promise<{ columns: ColumnMeta[]; rows: RowDTO[]; total: number }> {
   const fx = normalizeFilters(f);
 
-  const { sql: cardPred, params: cardParams } = cardWhereClause(fx);
-  const havingNoPrice = buildHaving(fx, userId, { skipPrice: true });
+  // Pull user-specific sets from Postgres.
+  const [pinnedOracleIds, ownedSids, watchSids] = userDbEnabled()
+    ? await Promise.all([
+        getPinnedOracleIds(userId),
+        listOwnedScryfallIds(userId),
+        listWatchlistScryfallIds(userId),
+      ])
+    : ([
+        (db.prepare(`SELECT oracle_id FROM pinned WHERE user_id = ?`).all(userId) as { oracle_id: string }[]).map(
+          (r) => r.oracle_id,
+        ),
+        (db.prepare(`SELECT scryfall_id FROM owned_cards WHERE user_id = ?`).all(userId) as { scryfall_id: string }[]).map(
+          (r) => r.scryfall_id,
+        ),
+        (db.prepare(`SELECT scryfall_id FROM watchlist WHERE user_id = ?`).all(userId) as { scryfall_id: string }[]).map(
+          (r) => r.scryfall_id,
+        ),
+      ] as const);
+  const pinnedOracleSet = new Set(pinnedOracleIds);
+  const ownedSidSet = new Set(ownedSids);
+  const watchSidSet = new Set(watchSids);
+
+  const ownedOracleIds =
+    ownedSids.length > 0
+      ? (db
+          .prepare(
+            `SELECT DISTINCT oracle_id FROM printings WHERE scryfall_id IN (${ownedSids.map(() => "?").join(",")})`,
+          )
+          .all(...ownedSids) as { oracle_id: string }[]).map((r) => r.oracle_id)
+      : [];
+  const watchOracleIds =
+    watchSids.length > 0
+      ? (db
+          .prepare(
+            `SELECT DISTINCT oracle_id FROM printings WHERE scryfall_id IN (${watchSids.map(() => "?").join(",")})`,
+          )
+          .all(...watchSids) as { oracle_id: string }[]).map((r) => r.oracle_id)
+      : [];
+  const ownedOracleSet = new Set(ownedOracleIds);
+  const watchOracleSet = new Set(watchOracleIds);
+
+  // Owned/watchlist/pinned are handled via Postgres-backed sets below, not via SQLite tables.
+  const fxUserless = { ...fx, owned: null, watchlist: null, pinned: null };
+
+  const { sql: cardPred, params: cardParams } = cardWhereClause(fxUserless);
+  const havingNoPrice = buildHaving(fxUserless, userId, { skipPrice: true });
   const gexpr = groupKeyExpr(fx);
   const gc = groupCollapsedClause(fx, gexpr);
 
@@ -241,6 +285,7 @@ export function getHeatmapData(
     havingNoPrice.sql,
     havingNoPrice.params,
     userId,
+    pinnedOracleIds,
   );
   const physicalSetCodes = physicalColumns.map((c) => c.code);
   const valueLayout = fx.heatmapColumnLayout === "value" && physicalSetCodes.length > 0;
@@ -253,7 +298,7 @@ export function getHeatmapData(
         quick_pin_column: pinColSet.has(c.code.toLowerCase()),
       }));
 
-  const { sql: havingSql, params: havingParams } = buildHaving(fx, userId, {
+  const { sql: havingSql, params: havingParams } = buildHaving(fxUserless, userId, {
     priceSetCodes: physicalSetCodes,
   });
 
@@ -261,14 +306,33 @@ export function getHeatmapData(
   const whereTail = `${havingSql} ${gc.sql}${visPrint.sql}`;
   const whereParams = [...havingParams, ...gc.params, ...visPrint.params];
 
+  const userClauseParts: string[] = [];
+  const userClauseParams: unknown[] = [];
+  const addOracleIn = (ids: string[], negate: boolean) => {
+    if (!ids.length) {
+      if (!negate) userClauseParts.push("0=1");
+      return;
+    }
+    const ph = ids.map(() => "?").join(",");
+    userClauseParts.push(`c.oracle_id ${negate ? "NOT " : ""}IN (${ph})`);
+    userClauseParams.push(...ids);
+  };
+  if (fx.owned === true) addOracleIn(ownedOracleIds, false);
+  else if (fx.owned === false) addOracleIn(ownedOracleIds, true);
+  if (fx.watchlist === true) addOracleIn(watchOracleIds, false);
+  else if (fx.watchlist === false) addOracleIn(watchOracleIds, true);
+  if (fx.pinned === true) addOracleIn(pinnedOracleIds, false);
+  else if (fx.pinned === false) addOracleIn(pinnedOracleIds, true);
+  const userWhereSql = userClauseParts.length ? ` AND (${userClauseParts.join(" AND ")})` : "";
+
   const countSql =
     fx.quickPinRows.length > 0
-      ? `SELECT COUNT(*) AS n FROM cards c WHERE (${cardPred} ${whereTail}) OR (c.oracle_id IN (${fx.quickPinRows.map(() => "?").join(",")}) ${whereTail})`
-      : `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${whereTail}`;
+      ? `SELECT COUNT(*) AS n FROM cards c WHERE (${cardPred} ${whereTail}${userWhereSql}) OR (c.oracle_id IN (${fx.quickPinRows.map(() => "?").join(",")}) ${whereTail}${userWhereSql})`
+      : `SELECT COUNT(*) AS n FROM cards c WHERE ${cardPred} ${whereTail}${userWhereSql}`;
   const countParams =
     fx.quickPinRows.length > 0
-      ? [...cardParams, ...whereParams, ...fx.quickPinRows, ...whereParams]
-      : [...cardParams, ...whereParams];
+      ? [...cardParams, ...whereParams, ...userClauseParams, ...fx.quickPinRows, ...whereParams, ...userClauseParams]
+      : [...cardParams, ...whereParams, ...userClauseParams];
   const total = (db.prepare(countSql).get(...countParams) as { n: number }).n;
 
   const gSelect = gexpr ? `, (${gexpr}) AS _gk` : ", NULL AS _gk";
@@ -280,9 +344,9 @@ export function getHeatmapData(
       ? (db
           .prepare(
             `SELECT c.* ${gSelect}${ordering.select} FROM cards c
-             WHERE c.oracle_id IN (${qpPh}) ${whereTail}`,
+             WHERE c.oracle_id IN (${qpPh}) ${whereTail}${userWhereSql}`,
           )
-          .all(...ordering.params, ...fx.quickPinRows, ...whereParams) as Record<string, unknown>[])
+          .all(...ordering.params, ...fx.quickPinRows, ...whereParams, ...userClauseParams) as Record<string, unknown>[])
       : [];
   const qOrder = new Map(fx.quickPinRows.map((id, i) => [id, i]));
   quickPinRowsData.sort(
@@ -290,16 +354,23 @@ export function getHeatmapData(
       (qOrder.get(a.oracle_id as string) ?? 999) - (qOrder.get(b.oracle_id as string) ?? 999),
   );
 
-  const pinnedRows: Record<string, unknown>[] = fx.showPinned
-    ? (db
-        .prepare(
-          `SELECT c.* ${gSelect}${ordering.select} FROM cards c
-       JOIN pinned pin ON pin.oracle_id = c.oracle_id AND pin.user_id = ?
-       WHERE ${cardPred} ${whereTail}
-       ORDER BY ${ordering.orderBy}`,
-        )
-        .all(...ordering.params, userId, ...cardParams, ...whereParams) as Record<string, unknown>[])
-    : [];
+  const pinnedRows: Record<string, unknown>[] =
+    fx.showPinned && pinnedOracleIds.length > 0
+      ? (db
+          .prepare(
+            `SELECT c.* ${gSelect}${ordering.select} FROM cards c
+             WHERE c.oracle_id IN (${pinnedOracleIds.map(() => "?").join(",")})
+               AND ${cardPred} ${whereTail}${userWhereSql}
+             ORDER BY ${ordering.orderBy}`,
+          )
+          .all(
+            ...ordering.params,
+            ...pinnedOracleIds,
+            ...cardParams,
+            ...whereParams,
+            ...userClauseParams,
+          ) as Record<string, unknown>[])
+      : [];
 
   const offset = fx.page * fx.pageSize;
   const quickPageEx =
@@ -309,7 +380,7 @@ export function getHeatmapData(
   const pageRows = db
     .prepare(
       `SELECT c.* ${gSelect}${ordering.select} FROM cards c
-     WHERE ${cardPred} ${whereTail}${quickPageEx}
+     WHERE ${cardPred} ${whereTail}${userWhereSql}${quickPageEx}
      ORDER BY ${ordering.orderBy}
      LIMIT ? OFFSET ?`,
     )
@@ -317,6 +388,7 @@ export function getHeatmapData(
       ...ordering.params,
       ...cardParams,
       ...whereParams,
+      ...userClauseParams,
       ...(fx.quickPinRows.length ? fx.quickPinRows : []),
       fx.pageSize,
       offset,
@@ -380,56 +452,37 @@ export function getHeatmapData(
     byOracle.get(pr.oracle_id)!.set(pr.set_code, pr);
   }
 
-  const ownedStmt = db.prepare(`
-    SELECT scryfall_id, COUNT(*) AS n FROM owned_cards WHERE user_id = ? AND scryfall_id IN (
-      SELECT scryfall_id FROM printings WHERE oracle_id IN (${inList})
-    ) GROUP BY scryfall_id
-  `);
-  const ownedMap = new Map(
-    (ownedStmt.all(userId, ...oracleIds) as { scryfall_id: string; n: number }[]).map((o) => [
-      o.scryfall_id,
-      o.n,
-    ]),
-  );
+  // Owned / watchlist / pinned are stored in Postgres; derive per-printing and per-oracle state here.
+  const ownedMap = new Map<string, number>();
+  for (const sid of ownedSids) {
+    ownedMap.set(sid, (ownedMap.get(sid) ?? 0) + 1);
+  }
 
-  /** Total owned copies per oracle (any printing), for row chrome — not limited to visible set columns. */
-  const ownedQtyByOracleRows = db
-    .prepare(
-      `SELECT p.oracle_id AS oid, COUNT(*) AS n
-       FROM owned_cards o
-       INNER JOIN printings p ON p.scryfall_id = o.scryfall_id
-       WHERE o.user_id = ? AND p.oracle_id IN (${inList})
-       GROUP BY p.oracle_id`,
-    )
-    .all(userId, ...oracleIds) as { oid: string; n: number }[];
-  const ownedQtyByOracle = new Map(ownedQtyByOracleRows.map((r) => [r.oid, r.n]));
+  const wl = new Set<string>(watchSids);
+  const watchlistedOracles = new Set<string>(watchOracleIds);
+  const pin = new Set<string>(pinnedOracleIds.filter((oid) => oracleIds.includes(oid)));
 
-  const wl = new Set(
-    (
-      db
-        .prepare(
-          `SELECT scryfall_id FROM watchlist WHERE user_id = ? AND scryfall_id IN (SELECT scryfall_id FROM printings WHERE oracle_id IN (${inList}))`,
+  // Total owned copies per oracle (any printing), for row chrome — not limited to visible set columns.
+  const ownedQtyByOracle = new Map<string, number>();
+  const uniqOwnedSids = [...new Set(ownedSids)];
+  const sidToOracle =
+    uniqOwnedSids.length > 0
+      ? new Map(
+          (db
+            .prepare(
+              `SELECT scryfall_id, oracle_id FROM printings WHERE scryfall_id IN (${uniqOwnedSids.map(() => "?").join(",")})`,
+            )
+            .all(...uniqOwnedSids) as { scryfall_id: string; oracle_id: string }[]).map((r) => [
+            r.scryfall_id,
+            r.oracle_id,
+          ]),
         )
-        .all(userId, ...oracleIds) as { scryfall_id: string }[]
-    ).map((x) => x.scryfall_id),
-  );
-
-  const watchlistedOracleRows = db
-    .prepare(
-      `SELECT DISTINCT p.oracle_id AS oid FROM watchlist w
-       INNER JOIN printings p ON p.scryfall_id = w.scryfall_id
-       WHERE w.user_id = ? AND p.oracle_id IN (${inList})`,
-    )
-    .all(userId, ...oracleIds) as { oid: string }[];
-  const watchlistedOracles = new Set(watchlistedOracleRows.map((r) => r.oid));
-
-  const pin = new Set(
-    (
-      db
-        .prepare(`SELECT oracle_id FROM pinned WHERE user_id = ? AND oracle_id IN (${inList})`)
-        .all(userId, ...oracleIds) as { oracle_id: string }[]
-    ).map((x) => x.oracle_id),
-  );
+      : new Map<string, string>();
+  for (const sid of ownedSids) {
+    const oid = sidToOracle.get(sid);
+    if (!oid) continue;
+    ownedQtyByOracle.set(oid, (ownedQtyByOracle.get(oid) ?? 0) + 1);
+  }
 
   const countAllPrintings = fx.valueAggScope === "all" || physicalSetCodes.length === 0;
   const printingsCountSql = countAllPrintings

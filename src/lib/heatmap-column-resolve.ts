@@ -140,6 +140,7 @@ export function resolveHeatmapColumns(
   havingSql: string,
   havingParams: unknown[],
   userId: string,
+  pinnedOracleIds?: string[],
 ): ColumnMeta[] {
   const now = Date.now();
   const key = colResolveCacheKey(f, cardPred, cardParams, havingSql, havingParams, userId);
@@ -182,19 +183,22 @@ export function resolveHeatmapColumns(
     const known = [...byCode.keys()];
     const notIn =
       known.length > 0 ? `AND p.set_code NOT IN (${known.map(() => "?").join(",")})` : "";
-    const pinSql = `
-      SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
-      FROM pinned pin
-      INNER JOIN printings p ON p.oracle_id = pin.oracle_id
-      INNER JOIN sets s ON s.code = p.set_code
-      WHERE pin.user_id = ? ${notIn}
-        AND (s.release_date IS NULL OR s.release_date <= ?)
-    `;
-    const pinParams: unknown[] = [userId, ...known, POC_RELEASE_CUTOFF];
-    const pinScoped = appendColumnScopeFilters(f, pinSql, pinParams);
-    const pinRows = db.prepare(pinScoped.sql).all(...pinScoped.params) as SetColumnRow[];
-    for (const r of pinRows) {
-      if (!byCode.has(r.code)) byCode.set(r.code, rowToMeta(r));
+    const pins = (pinnedOracleIds ?? []).filter(Boolean);
+    if (pins.length) {
+      const ph = pins.map(() => "?").join(",");
+      const pinSql = `
+        SELECT DISTINCT s.code, s.name, s.release_date, s.set_type, s.icon_svg_path, s.parent_set_code
+        FROM printings p
+        INNER JOIN sets s ON s.code = p.set_code
+        WHERE p.oracle_id IN (${ph}) ${notIn}
+          AND (s.release_date IS NULL OR s.release_date <= ?)
+      `;
+      const pinParams: unknown[] = [...pins, ...known, POC_RELEASE_CUTOFF];
+      const pinScoped = appendColumnScopeFilters(f, pinSql, pinParams);
+      const pinRows = db.prepare(pinScoped.sql).all(...pinScoped.params) as SetColumnRow[];
+      for (const r of pinRows) {
+        if (!byCode.has(r.code)) byCode.set(r.code, rowToMeta(r));
+      }
     }
   }
 

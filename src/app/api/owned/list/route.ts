@@ -1,30 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { LOCAL_USER_ID } from "@/lib/constants";
+import { requireUserId } from "@/lib/require-user";
+import { deleteOwned, listOwned, updateOwned } from "@/lib/userdb";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET() {
+  const userId = await requireUserId();
+  const owned = await listOwned(userId);
   const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT o.id, o.scryfall_id, o.condition, o.is_foil, o.purchase_price, o.acquired_date, o.notes,
-              c.name AS card_name, s.name AS set_name, s.code AS set_code,
-              pc.usd, pc.usd_foil
-       FROM owned_cards o
-       JOIN printings p ON p.scryfall_id = o.scryfall_id
-       JOIN cards c ON c.oracle_id = p.oracle_id
-       JOIN sets s ON s.code = p.set_code
-       LEFT JOIN prices_current pc ON pc.scryfall_id = o.scryfall_id
-       WHERE o.user_id = ?
-       ORDER BY c.name, s.release_date`,
-    )
-    .all(LOCAL_USER_ID) as Record<string, unknown>[];
+  const sids = [...new Set(owned.map((o) => o.scryfall_id))];
+  const meta =
+    sids.length > 0
+      ? (db
+          .prepare(
+            `SELECT p.scryfall_id, c.name AS card_name, s.name AS set_name, s.code AS set_code,
+                    pc.usd, pc.usd_foil
+             FROM printings p
+             JOIN cards c ON c.oracle_id = p.oracle_id
+             JOIN sets s ON s.code = p.set_code
+             LEFT JOIN prices_current pc ON pc.scryfall_id = p.scryfall_id
+             WHERE p.scryfall_id IN (${sids.map(() => "?").join(",")})`,
+          )
+          .all(...sids) as {
+          scryfall_id: string;
+          card_name: string;
+          set_name: string;
+          set_code: string;
+          usd: number | null;
+          usd_foil: number | null;
+        }[])
+      : [];
+  const bySid = new Map(meta.map((m) => [m.scryfall_id, m]));
+  const rows = owned.map((o) => ({ ...o, ...(bySid.get(o.scryfall_id) ?? {}) }));
+  rows.sort((a, b) => String(a.card_name ?? "").localeCompare(String(b.card_name ?? "")) || String(a.set_code ?? "").localeCompare(String(b.set_code ?? "")));
   return NextResponse.json(rows);
 }
 
 export async function PATCH(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const body = (await req.json()) as {
       id?: string;
       condition?: string;
@@ -33,30 +49,14 @@ export async function PATCH(req: NextRequest) {
       acquired_date?: string | null;
     };
     if (!body.id) return NextResponse.json({ error: "missing_id" }, { status: 400 });
-    const db = getDb();
-    const fields: string[] = [];
-    const vals: unknown[] = [];
-    if (body.condition) {
-      fields.push("condition = ?");
-      vals.push(body.condition);
-    }
-    if (body.purchase_price !== undefined) {
-      fields.push("purchase_price = ?");
-      vals.push(body.purchase_price);
-    }
-    if (body.notes !== undefined) {
-      fields.push("notes = ?");
-      vals.push(body.notes);
-    }
-    if (body.acquired_date !== undefined) {
-      fields.push("acquired_date = ?");
-      vals.push(body.acquired_date);
-    }
-    if (!fields.length) return NextResponse.json({ ok: true });
-    vals.push(body.id, LOCAL_USER_ID);
-    db.prepare(
-      `UPDATE owned_cards SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`,
-    ).run(...vals);
+    await updateOwned({
+      userId,
+      id: body.id,
+      condition: body.condition,
+      purchase_price: body.purchase_price,
+      notes: body.notes,
+      acquired_date: body.acquired_date,
+    });
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error(e);

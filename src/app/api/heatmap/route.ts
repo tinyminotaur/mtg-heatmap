@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getHeatmapData, parseFilters } from "@/lib/heatmap-query";
+import { requireUserId } from "@/lib/require-user";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,7 +11,8 @@ export async function GET(req: NextRequest) {
   try {
     const db = getDb();
     const f = parseFilters(req.nextUrl.searchParams);
-    const data = getHeatmapData(db, f);
+    const userId = await requireUserId();
+    const data = await getHeatmapData(db, f, userId);
     return NextResponse.json(data);
   } catch (e) {
     console.error(e);

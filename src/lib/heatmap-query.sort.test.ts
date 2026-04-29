@@ -7,7 +7,7 @@ import { getHeatmapData } from "@/lib/heatmap-query";
 import { defaultHeatmapFilters } from "@/lib/filter-state";
 
 describe("getHeatmapData sorting + pagination", () => {
-  it("paginates correctly when sorting by price_min asc", () => {
+  it("paginates correctly when sorting by price_min asc", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mtg-heatmap-test-"));
     const dbPath = path.join(dir, "mtg.db");
     const db = openDbAt(dbPath);
@@ -70,9 +70,9 @@ describe("getHeatmapData sorting + pagination", () => {
         sort: "price_min:asc",
       });
 
-      const p0 = getHeatmapData(db, mkFilters(0)).rows.map((r) => r.name);
-      const p1 = getHeatmapData(db, mkFilters(1)).rows.map((r) => r.name);
-      const p2 = getHeatmapData(db, mkFilters(2)).rows.map((r) => r.name);
+      const p0 = (await getHeatmapData(db, mkFilters(0), "test-user")).rows.map((r) => r.name);
+      const p1 = (await getHeatmapData(db, mkFilters(1), "test-user")).rows.map((r) => r.name);
+      const p2 = (await getHeatmapData(db, mkFilters(2), "test-user")).rows.map((r) => r.name);
 
       expect(p0).toEqual(["Alpha"]);
       expect(p1).toEqual(["Beta"]);

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { LOCAL_USER_ID } from "@/lib/constants";
 import type { HeatmapFilters } from "@/lib/filter-state";
 import { defaultColorOrFull } from "@/lib/heatmap/color-lanes";
 import { buildHaving, cardWhereClause, groupCollapsedClause, groupKeyExpr, requirePrintingInHeatmapColumnsSql } from "@/lib/heatmap/sql";
 import { resolveHeatmapColumns } from "@/lib/heatmap-column-resolve";
 import { normalizeFilters } from "@/lib/heatmap/filters";
 import { parseFilters } from "@/lib/heatmap-query";
+import { requireUserId } from "@/lib/require-user";
+import { getPinnedOracleIds, listOwnedScryfallIds, listWatchlistScryfallIds, userDbEnabled } from "@/lib/userdb";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -61,8 +62,10 @@ function baseCardWhere(
   f: HeatmapFilters,
   physicalSetCodes: string[],
 ): { sql: string; params: unknown[] } {
-  const userId = LOCAL_USER_ID;
-  const fx = normalizeFilters(f);
+  const userId = "local";
+  const fx0 = normalizeFilters(f);
+  // User-scoped predicates are handled at the main heatmap endpoint; facets are catalog-scoped.
+  const fx = { ...fx0, owned: null, watchlist: null, pinned: null };
   const { sql: cardPred, params: cardParams } = cardWhereClause(fx);
 
   // Column resolution intentionally happens before pagination in the main endpoint.
@@ -90,11 +93,12 @@ export async function GET(req: NextRequest) {
     const db = getDb();
     const f = parseFilters(req.nextUrl.searchParams);
     const fx = normalizeFilters(f);
-    const userId = LOCAL_USER_ID;
+    const userId = await requireUserId();
+    const fxUserless = { ...fx, owned: null, watchlist: null, pinned: null };
 
     // Resolve physical set columns so price facets match “visible columns” logic.
-    const { sql: cardPred, params: cardParams } = cardWhereClause(fx);
-    const havingNoPrice = buildHaving(fx, userId, { skipPrice: true });
+    const { sql: cardPred, params: cardParams } = cardWhereClause(fxUserless);
+    const havingNoPrice = buildHaving(fxUserless, userId, { skipPrice: true });
     const physicalColumns = resolveHeatmapColumns(
       db,
       fx,
@@ -106,12 +110,12 @@ export async function GET(req: NextRequest) {
     );
     const physicalSetCodes = physicalColumns.map((c) => c.code);
 
-    const base = baseCardWhere(fx, physicalSetCodes);
-    const baseForRarity = baseCardWhere(withFacetCleared(fx, "rarity"), physicalSetCodes);
-    const baseForColors = baseCardWhere(withFacetCleared(fx, "colorLanes"), physicalSetCodes);
-    const baseForFormats = baseCardWhere(withFacetCleared(fx, "formats"), physicalSetCodes);
-    const baseForTypes = baseCardWhere(withFacetCleared(fx, "types"), physicalSetCodes);
-    const baseForRowScope = baseCardWhere(withFacetCleared(fx, "rowScope"), physicalSetCodes);
+    const base = baseCardWhere(fxUserless, physicalSetCodes);
+    const baseForRarity = baseCardWhere(withFacetCleared(fxUserless, "rarity"), physicalSetCodes);
+    const baseForColors = baseCardWhere(withFacetCleared(fxUserless, "colorLanes"), physicalSetCodes);
+    const baseForFormats = baseCardWhere(withFacetCleared(fxUserless, "formats"), physicalSetCodes);
+    const baseForTypes = baseCardWhere(withFacetCleared(fxUserless, "types"), physicalSetCodes);
+    const baseForRowScope = baseCardWhere(withFacetCleared(fxUserless, "rowScope"), physicalSetCodes);
 
     const totalRow = db
       .prepare(`SELECT COUNT(*) AS n FROM cards c WHERE ${base.sql}`)
@@ -222,6 +226,30 @@ export async function GET(req: NextRequest) {
       .prepare(`SELECT COUNT(DISTINCT c.oracle_id) AS n FROM cards c WHERE ${baseForRowScope.sql} AND c.is_reserved = 1`)
       .get(...baseForRowScope.params) as { n: number };
 
+    const [ownedSids, watchSids, pinnedOids] = userDbEnabled()
+      ? await Promise.all([listOwnedScryfallIds(userId), listWatchlistScryfallIds(userId), getPinnedOracleIds(userId)])
+      : [
+          (db.prepare(`SELECT scryfall_id FROM owned_cards WHERE user_id = ?`).all(userId) as { scryfall_id: string }[]).map((r) => r.scryfall_id),
+          (db.prepare(`SELECT scryfall_id FROM watchlist WHERE user_id = ?`).all(userId) as { scryfall_id: string }[]).map((r) => r.scryfall_id),
+          (db.prepare(`SELECT oracle_id FROM pinned WHERE user_id = ?`).all(userId) as { oracle_id: string }[]).map((r) => r.oracle_id),
+        ];
+    const ownedOracleCount =
+      ownedSids.length > 0
+        ? ((db
+            .prepare(
+              `SELECT COUNT(DISTINCT oracle_id) AS n FROM printings WHERE scryfall_id IN (${ownedSids.map(() => "?").join(",")})`,
+            )
+            .get(...ownedSids) as { n: number })?.n ?? 0)
+        : 0;
+    const watchOracleCount =
+      watchSids.length > 0
+        ? ((db
+            .prepare(
+              `SELECT COUNT(DISTINCT oracle_id) AS n FROM printings WHERE scryfall_id IN (${watchSids.map(() => "?").join(",")})`,
+            )
+            .get(...watchSids) as { n: number })?.n ?? 0)
+        : 0;
+
     const formatsRows = db
       .prepare(
         `
@@ -310,9 +338,9 @@ export async function GET(req: NextRequest) {
       rarity: rarityRows.map((r) => ({ key: r.k, n: r.n })),
       colorIdentity: colorRows.map((r) => ({ key: r.k, n: r.n })),
       rowScope: {
-        owned: ownedRow.n ?? 0,
-        watchlist: watchRow.n ?? 0,
-        pinned: pinnedRow.n ?? 0,
+        owned: ownedOracleCount,
+        watchlist: watchOracleCount,
+        pinned: pinnedOids.length,
         reserved: reservedRow.n ?? 0,
       },
       formats: formatsRows.map((r) => ({ key: r.k, n: r.n })),
